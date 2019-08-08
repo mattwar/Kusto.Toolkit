@@ -7,3 +7,10 @@ This project depends on:
 
 ## SymbolLoader
 Use the SymbolLoader class to feed the Kusto parser with database schemas directly from your cluster.
+
+```csharp
+var loader = new SymbolLoader(clusterConnectionString);
+var db = await loader.GetDatabaseSymbolAsync(dbName);
+var globalsWithDB = GlobalState.Default.WithDatabase(db);
+var parsed = KustoCode.ParseAndAnalyze(query, globalsWithDB);
+```
