@@ -1,4 +1,5 @@
 # Kushy
-Kusto analyzers and tools API's
+Tools for building Kusto query analyzers.
 
-Making using Kusto parser to analyze queries just a bit Kushier.
+## SymbolLoader
+Use the SymbolLoader class to feed your Kusto parser with database schemas directly from your cluster.
