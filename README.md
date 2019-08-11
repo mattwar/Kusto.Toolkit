@@ -10,18 +10,17 @@ Use the SymbolLoader class to feed the Kusto parser with database schemas direct
 
 
 ```csharp
-// load database and add it manually to GlobalState
+// load database and add it to globals
+var globals = GlobalState.Default;
 var loader = new SymbolLoader(clusterConnectionString);
-var db = await loader.LoadDatabaseAsync(dbName);
-var globalsWithDB = GlobalState.Default.WithDatabase(db);
+var globalsWithDB = await loader.AddOrUpdateDatabaseAsync(globals, dbName, asDefault: true);
 var parsed = KustoCode.ParseAndAnalyze(query, globalsWithDB);
 ```
 
 ```csharp
-// load database and add it automatically to GlobalState
+// load database schema into a symbol
 var loader = new SymbolLoader(clusterConnectionString);
-var globalsWithDB = await loader.AddOrUpdateDatabaseAsync(GlobalState.Default, dbName, asDefault: true);
-var parsed = KustoCode.ParseAndAnalyze(query, globalsWithDB);
+var db = await loader.LoadDatabaseAsync(dbName);
 ```
 
 ```csharp
@@ -31,7 +30,7 @@ var names = loader.GetDatabaseNamesAsync();
 ```
 
 ```csharp
-// load any databases referenced by query not already part of GlobalState
+// load any databases referenced by query not already part of globals
 var loader = new SymbolLoader(clusterConnectionString);
 var query = "database('somedb').Table | where x < y";
 var code = KustoCode.ParseAndAnalyze(query, globals);
