@@ -92,12 +92,12 @@ namespace Kushy
             if (db == null)
                 return globals;
 
-            var clusterUri = GetClusterUri(clusterName);
+            var clusterHost = GetClusterHost(clusterName);
 
-            var cluster = globals.GetCluster(clusterUri.Host);
+            var cluster = globals.GetCluster(clusterHost);
             if (cluster == null)
             {
-                cluster = new ClusterSymbol(clusterUri.Host, new[] { db }, isOpen: true);
+                cluster = new ClusterSymbol(clusterHost, new[] { db }, isOpen: true);
                 globals = globals.AddOrUpdateCluster(cluster);
             }
             else
@@ -285,11 +285,12 @@ namespace Kushy
             }
         }
 
-        private Uri GetClusterUri(string clusterName)
+        private string GetClusterHost(string clusterName)
         {
             var connection = GetClusterConnection(clusterName);
             var csb = new KustoConnectionStringBuilder(connection);
-            return new Uri(csb.DataSource);
+            var uri = new Uri(csb.DataSource);
+            return uri.Host;
         }
 
         private string GetClusterConnection(string clusterName)
@@ -299,29 +300,30 @@ namespace Kushy
                 var csb = new KustoConnectionStringBuilder(_defaultConnection);
                 var defaultUri = new Uri(csb.DataSource);
 
-                var host = clusterName;
-                var scheme = defaultUri.Scheme;
-                var port = defaultUri.Port;
-
                 if (Uri.TryCreate(clusterName, UriKind.Absolute, out var clusterUri))
                 {
-                    host = clusterUri.Host;
-                    scheme = !string.IsNullOrEmpty(clusterUri.Scheme) ? clusterUri.Scheme : scheme;
-                    host = clusterUri.Host;
-                    port = clusterUri.Port != 0 ? clusterUri.Port : port;
+                    if (string.Compare(clusterUri.Host, defaultUri.Host, ignoreCase: true) != 0)
+                    {
+                        csb.DataSource = clusterName;
+                        return csb.ConnectionString;
+                    }
                 }
-
-                if (!host.Contains('.'))
+                else
                 {
-                    host += ".kusto.windows.net";
-                }
+                    var host = clusterName;
 
-                // if the host names are different changed the connection to refer to the cluster host
-                if (string.Compare(defaultUri.Host, host, ignoreCase: true) != 0)
-                {
-                    var source =  scheme + "://" + host + (port != 0 ? ":" + port : "");
-                    csb.DataSource = source;
-                    return csb.ConnectionString;
+                    if (!host.Contains('.'))
+                    {
+                        host += ".kusto.windows.net";
+                    }
+
+                    if (string.Compare(host, defaultUri.Host, ignoreCase: true) != 0)
+                    {
+                        var scheme = clusterUri.Scheme;
+                        var port = clusterUri.Port != 0 ? clusterUri.Port : 0;
+                        csb.DataSource = scheme + "://" + host + (port != 0 ? ":" + port : "");
+                        return csb.ConnectionString;
+                    }
                 }
             }
 
