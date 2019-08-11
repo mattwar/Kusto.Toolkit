@@ -10,7 +10,7 @@ Use the SymbolLoader class to feed the Kusto parser with database schemas direct
 
 
 ```csharp
-// load database and add it to globals
+// load database, add it to globals and set it as default
 var globals = GlobalState.Default;
 var loader = new SymbolLoader(clusterConnectionString);
 var globalsWithDB = await loader.AddOrUpdateDatabaseAsync(globals, dbName, asDefault: true);
