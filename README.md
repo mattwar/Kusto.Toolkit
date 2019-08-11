@@ -30,10 +30,17 @@ var names = loader.GetDatabaseNamesAsync();
 ```
 
 ```csharp
-// load any databases referenced by query not already part of globals
+// start with default database loaded
 var loader = new SymbolLoader(clusterConnectionString);
+var globals = await loader.AddOrUpdateDatabaseAsync(GlobalState.Default, dbName, asDefault: true);
+
+// parse query with references to other databases
 var query = "database('somedb').Table | where x < y";
 var code = KustoCode.ParseAndAnalyze(query, globals);
+
+// load any databases referenced by query not already part of globals
 var updatedGlobals = await loader.AddReferencedDatabasesAsync(code);
+
+// reparse using updated globals
 var updatedCode = KustoCode.ParseAndAnalyze(query, updatedGlobals);
 ```
