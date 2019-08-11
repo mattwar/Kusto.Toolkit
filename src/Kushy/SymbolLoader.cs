@@ -3,23 +3,24 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-
 using Kusto.Cloud.Platform.Data;
 using Kusto.Data;
-using Kusto.Data.Common;
 using Kusto.Data.Data;
 using Kusto.Data.Net.Client;
+using Kusto.Language;
+using Kusto.Language.Editor;
 using Kusto.Language.Syntax;
 using Kusto.Language.Symbols;
 
-namespace Kusto.Language
+namespace Kushy
 {
     /// <summary>
     /// A class that retrieves schema information from a cluster as <see cref="Symbol"/> instances.
     /// </summary>
     public class SymbolLoader
     {
-        private readonly string _connection;
+        private readonly string _defaultConnection;
+        private readonly HashSet<string> _badClusterNames = new HashSet<string>();
 
         /// <summary>
         /// Creates a new <see cref="SymbolLoader"/> instance.
@@ -27,31 +28,36 @@ namespace Kusto.Language
         /// <param name="clusterConnection">The cluster connection string.</param>
         public SymbolLoader(string clusterConnection)
         {
-            this._connection = clusterConnection;
+            this._defaultConnection = clusterConnection;
         }
 
         /// <summary>
         /// Gets a list of all the database names in the cluster associated with the connection.
         /// </summary>
-        public async Task<string[]> GetDatabaseNamesAsync(CancellationToken cancellationToken = default)
+        public async Task<string[]> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
-            var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(_connection, "", ".show databases", cancellationToken);
+            var connection = GetClusterConnection(clusterName);
+            var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(connection, "", ".show databases", throwOnError, cancellationToken);
+            if (databases == null)
+                return null;
+
             return databases.Select(d => d.DatabaseName).ToArray();
         }
 
         /// <summary>
-        /// Gets a <see cref="DatabaseSymbol"/> instance matching the schema of a database.
+        /// Loads the schema for the specified databasea into a a <see cref="DatabaseSymbol"/>.
         /// </summary>
-        public async Task<DatabaseSymbol> GetDatabaseSymbolAsync(string databaseName, CancellationToken cancellationToken = default)
+        public async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
             var members = new List<Symbol>();
 
-            var csb = new KustoConnectionStringBuilder(_connection);
-            csb.InitialCatalog = databaseName;
-            var connectionWithDatabase = csb.ConnectionString;
+            var connection = GetClusterConnection(clusterName);
 
-            var tableSchemas = 
-                (await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(connectionWithDatabase, databaseName, $".show database {databaseName} schema", cancellationToken).ConfigureAwait(false))
+            var tableSchemas = await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(connection, databaseName, $".show database {databaseName} schema", throwOnError, cancellationToken).ConfigureAwait(false);
+            if (tableSchemas == null)
+                return null;
+
+            tableSchemas = tableSchemas
                 .Where(r => !string.IsNullOrEmpty(r.TableName) && !string.IsNullOrEmpty(r.ColumnName))
                 .ToArray();
 
@@ -62,9 +68,9 @@ namespace Kusto.Language
                 members.Add(tableSymbol);
             }
 
-            var functionSchemas =
-                (await ExecuteControlCommandAsync<ShowFunctionsResult>(connectionWithDatabase, databaseName, ".show functions", cancellationToken).ConfigureAwait(false))
-                .ToArray();
+            var functionSchemas = await ExecuteControlCommandAsync<ShowFunctionsResult>(connection, databaseName, ".show functions", throwOnError, cancellationToken).ConfigureAwait(false);
+            if (functionSchemas == null)
+                return null;
 
             foreach (var fun in functionSchemas)
             {
@@ -76,6 +82,106 @@ namespace Kusto.Language
             var databaseSymbol = new DatabaseSymbol(databaseName, members);
             return databaseSymbol;
         }
+
+        /// <summary>
+        /// Loads the schema for the specified database and returns a new <see cref="GlobalState"/> with the database added or updated.
+        /// </summary>
+        public async Task<GlobalState> AddOrUpdateDatabaseAsync(GlobalState globals, string databaseName, string clusterName = null, bool asDefault = false, bool throwOnError = false, CancellationToken cancellation = default)
+        {
+            var db = await LoadDatabaseAsync(databaseName, clusterName, throwOnError, cancellation).ConfigureAwait(false);
+            if (db == null)
+                return globals;
+
+            var clusterUri = GetClusterUri(clusterName);
+
+            var cluster = globals.GetCluster(clusterUri.Host);
+            if (cluster == null)
+            {
+                cluster = new ClusterSymbol(clusterUri.Host, new[] { db }, isOpen: true);
+                globals = globals.AddOrUpdateCluster(cluster);
+            }
+            else
+            {
+                cluster = cluster.AddOrUpdateDatabase(db);
+                globals = globals.AddOrUpdateCluster(cluster);
+            }
+
+            if (asDefault)
+            {
+                globals = globals.WithCluster(cluster).WithDatabase(db);
+            }
+
+            return globals;
+        }
+
+        /// <summary>
+        /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the query but not already present in the <see cref="GlobalState"/>.
+        /// </summary>
+        public async Task<GlobalState> AddReferencedDatabasesAsync(GlobalState globals, string query, CancellationToken cancellationToken = default)
+        {
+            var code = await Task.Run(() => KustoCode.ParseAndAnalyze(query, globals, cancellationToken));
+            return await AddReferencedDatabasesAsync(code, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the query but not already present in the <see cref="GlobalState"/>.
+        /// </summary>
+        public async Task<GlobalState> AddReferencedDatabasesAsync(KustoCode code, CancellationToken cancellationToken = default)
+        {
+            var services = new KustoCodeService(code);
+            var globals = code.Globals;
+
+            // find all explicit cluster (xxx) references
+            var clusterRefs = services.GetClusterReferences(cancellationToken);
+            foreach (ClusterReference clusterRef in clusterRefs)
+            {
+                // don't bother with cluster names that we've already shown to not exist
+                if (_badClusterNames.Contains(clusterRef.Cluster))
+                    continue;
+
+                var cluster = globals.GetCluster(clusterRef.Cluster);
+                if (cluster == null || cluster.IsOpen)
+                {
+                    // check to see if this is an actual cluster and get all database names
+                    var databaseNames = await GetDatabaseNamesAsync(clusterRef.Cluster).ConfigureAwait(false);
+                    if (databaseNames != null)
+                    {
+                        // initially populate with empty 'open' databases. These will get updated to full schema if referenced
+                        var databases = databaseNames.Select(db => new DatabaseSymbol(db, null, isOpen: true)).ToArray();
+                        cluster = new ClusterSymbol(clusterRef.Cluster, databases);
+                        globals = globals.AddOrUpdateCluster(cluster);
+                    }
+                }
+                else
+                {
+                    _badClusterNames.Add(clusterRef.Cluster);
+                }
+            }
+
+            // examine all explicit database(xxx) references
+            var dbRefs = services.GetDatabaseReferences(cancellationToken);
+            foreach (DatabaseReference dbRef in dbRefs)
+            {
+                // get implicit or explicit named cluster
+                var cluster = string.IsNullOrEmpty(dbRef.Cluster) ? globals.Cluster : globals.GetCluster(dbRef.Cluster);
+
+                if (cluster != null)
+                {
+                    // look for existing database of this name
+                    var db = (DatabaseSymbol)cluster.Members.FirstOrDefault(m => m.Name == dbRef.Database);
+
+                    // is this one of those not-yet-populated databases?
+                    if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
+                    {
+                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, asDefault: false, throwOnError: false, cancellationToken).ConfigureAwait(false);
+                        globals = newGlobals != null ? newGlobals : globals;
+                    }
+                }
+            }
+
+            return globals;
+        }
+
 
         /// <summary>
         /// Convert CLR type name into a Kusto scalar type.
@@ -160,16 +266,73 @@ namespace Kusto.Language
         /// <summary>
         /// Executes a query or command against a kusto cluster and returns a sequence of result row instances.
         /// </summary>
-        private static async Task<IEnumerable<T>> ExecuteControlCommandAsync<T>(string connection, string database, string command, CancellationToken cancellationToken)
+        private static async Task<IEnumerable<T>> ExecuteControlCommandAsync<T>(string connection, string database, string command, bool throwOnError, CancellationToken cancellationToken)
         {
-            using (var client = KustoClientFactory.CreateCslAdminProvider(connection))
+            try
             {
-                var resultReader = await client.ExecuteControlCommandAsync(database, command).ConfigureAwait(false);
-                var results = KustoDataReaderParser.ParseV1(resultReader, null);
-                var tableReader = results[WellKnownDataSet.PrimaryResult].Single().TableData.CreateDataReader();
-                var objectReader = new ObjectReader<T>(tableReader);
-                return objectReader;
+                using (var client = KustoClientFactory.CreateCslAdminProvider(connection))
+                {
+                    var resultReader = await client.ExecuteControlCommandAsync(database, command).ConfigureAwait(false);
+                    var results = KustoDataReaderParser.ParseV1(resultReader, null);
+                    var tableReader = results[WellKnownDataSet.PrimaryResult].Single().TableData.CreateDataReader();
+                    var objectReader = new ObjectReader<T>(tableReader);
+                    return objectReader;
+                }
             }
+            catch (Exception) when (!throwOnError)
+            {
+                return null;
+            }
+        }
+
+        private Uri GetClusterUri(string clusterName)
+        {
+            var connection = GetClusterConnection(clusterName);
+            var csb = new KustoConnectionStringBuilder(connection);
+            return new Uri(csb.DataSource);
+        }
+
+        private string GetClusterConnection(string clusterName)
+        {
+            if (!string.IsNullOrEmpty(clusterName))
+            {
+                var csb = new KustoConnectionStringBuilder(_defaultConnection);
+                var defaultUri = new Uri(csb.DataSource);
+
+                var host = clusterName;
+                var scheme = defaultUri.Scheme;
+                var port = defaultUri.Port;
+
+                if (Uri.TryCreate(clusterName, UriKind.Absolute, out var clusterUri))
+                {
+                    host = clusterUri.Host;
+                    scheme = !string.IsNullOrEmpty(clusterUri.Scheme) ? clusterUri.Scheme : scheme;
+                    host = clusterUri.Host;
+                    port = clusterUri.Port != 0 ? clusterUri.Port : port;
+                }
+
+                if (!host.Contains('.'))
+                {
+                    host += ".kusto.windows.net";
+                }
+
+                // if the host names are different changed the connection to refer to the cluster host
+                if (string.Compare(defaultUri.Host, host, ignoreCase: true) != 0)
+                {
+                    var source =  scheme + "://" + host + (port != 0 ? ":" + port : "");
+                    csb.DataSource = source;
+                    return csb.ConnectionString;
+                }
+            }
+
+            return _defaultConnection;
+        }
+
+        private string GetDatabaseConnection(string connection, string databaseName)
+        {
+            var csb = new KustoConnectionStringBuilder(connection);
+            csb.InitialCatalog = databaseName;
+            return csb.ConnectionString;
         }
 
         public class ShowDatabasesResult
