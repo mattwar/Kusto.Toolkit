@@ -20,7 +20,7 @@ namespace Kushy
     public class SymbolLoader
     {
         private readonly string _defaultConnection;
-        private readonly HashSet<string> _badClusterNames = new HashSet<string>();
+        private readonly HashSet<string> _ignoreClusterNames = new HashSet<string>();
 
         /// <summary>
         /// Creates a new <see cref="SymbolLoader"/> instance.
@@ -86,7 +86,23 @@ namespace Kushy
         /// <summary>
         /// Loads the schema for the specified database and returns a new <see cref="GlobalState"/> with the database added or updated.
         /// </summary>
-        public async Task<GlobalState> AddOrUpdateDatabaseAsync(GlobalState globals, string databaseName, string clusterName = null, bool asDefault = false, bool throwOnError = false, CancellationToken cancellation = default)
+        public Task<GlobalState> AddOrUpdateDatabaseAsync(GlobalState globals, string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellation = default)
+        {
+            return AddOrUpdateDatabaseAsync(globals, databaseName, clusterName, asDefault: false, throwOnError, cancellation);
+        }
+
+        /// <summary>
+        /// Loads the schema for the specified default database and returns a new <see cref="GlobalState"/> with the database added or updated.
+        /// </summary>
+        public Task<GlobalState> AddOrUpdateDefaultDatabaseAsync(GlobalState globals, string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellation = default)
+        {
+            return AddOrUpdateDatabaseAsync(globals, databaseName, clusterName, asDefault: true, throwOnError, cancellation);
+        }
+
+        /// <summary>
+        /// Loads the schema for the specified database and returns a new <see cref="GlobalState"/> with the database added or updated.
+        /// </summary>
+        private async Task<GlobalState> AddOrUpdateDatabaseAsync(GlobalState globals, string databaseName, string clusterName, bool asDefault, bool throwOnError, CancellationToken cancellation)
         {
             var db = await LoadDatabaseAsync(databaseName, clusterName, throwOnError, cancellation).ConfigureAwait(false);
             if (db == null)
@@ -117,26 +133,39 @@ namespace Kushy
         /// <summary>
         /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the query but not already present in the <see cref="GlobalState"/>.
         /// </summary>
-        public async Task<GlobalState> AddReferencedDatabasesAsync(GlobalState globals, string query, CancellationToken cancellationToken = default)
+        public async Task<KustoCode> AddReferencedDatabasesAsync(KustoCode code, CancellationToken cancellationToken = default)
         {
-            var code = await Task.Run(() => KustoCode.ParseAndAnalyze(query, globals, cancellationToken));
-            return await AddReferencedDatabasesAsync(code, cancellationToken).ConfigureAwait(false);
+            var service = new KustoCodeService(code);
+            var globals = await AddReferencedDatabasesAsync(code.Globals, service, cancellationToken).ConfigureAwait(false);
+            return code.WithGlobals(globals);
+        }
+
+        /// <summary>
+        /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the <see cref="CodeScript"/ document but not already present in the <see cref="GlobalState"/>.
+        /// </summary>
+        public async Task<CodeScript> AddReferencedDatabasesAsync(CodeScript script, CancellationToken cancellationToken = default)
+        {
+            var globals = script.Globals;
+
+            foreach (var block in script.Blocks)
+            {
+                globals = await AddReferencedDatabasesAsync(globals, block.Service, cancellationToken).ConfigureAwait(false);
+            }
+
+            return script.WithGlobals(globals);
         }
 
         /// <summary>
         /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the query but not already present in the <see cref="GlobalState"/>.
         /// </summary>
-        public async Task<GlobalState> AddReferencedDatabasesAsync(KustoCode code, CancellationToken cancellationToken = default)
+        private async Task<GlobalState> AddReferencedDatabasesAsync(GlobalState globals, CodeService service, CancellationToken cancellationToken = default)
         {
-            var services = new KustoCodeService(code);
-            var globals = code.Globals;
-
             // find all explicit cluster (xxx) references
-            var clusterRefs = services.GetClusterReferences(cancellationToken);
+            var clusterRefs = service.GetClusterReferences(cancellationToken);
             foreach (ClusterReference clusterRef in clusterRefs)
             {
                 // don't bother with cluster names that we've already shown to not exist
-                if (_badClusterNames.Contains(clusterRef.Cluster))
+                if (_ignoreClusterNames.Contains(clusterRef.Cluster))
                     continue;
 
                 var cluster = globals.GetCluster(clusterRef.Cluster);
@@ -154,12 +183,13 @@ namespace Kushy
                 }
                 else
                 {
-                    _badClusterNames.Add(clusterRef.Cluster);
+                    // we already have all the schema for this cluster
+                    _ignoreClusterNames.Add(clusterRef.Cluster);
                 }
             }
 
             // examine all explicit database(xxx) references
-            var dbRefs = services.GetDatabaseReferences(cancellationToken);
+            var dbRefs = service.GetDatabaseReferences(cancellationToken);
             foreach (DatabaseReference dbRef in dbRefs)
             {
                 // get implicit or explicit named cluster
@@ -168,7 +198,7 @@ namespace Kushy
                 if (cluster != null)
                 {
                     // look for existing database of this name
-                    var db = (DatabaseSymbol)cluster.Members.FirstOrDefault(m => m.Name == dbRef.Database);
+                    var db = cluster.Databases.FirstOrDefault(m => m.Name == dbRef.Database);
 
                     // is this one of those not-yet-populated databases?
                     if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
@@ -181,7 +211,6 @@ namespace Kushy
 
             return globals;
         }
-
 
         /// <summary>
         /// Convert CLR type name into a Kusto scalar type.
