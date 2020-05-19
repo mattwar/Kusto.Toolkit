@@ -219,10 +219,25 @@ namespace Kushy
         {
             switch (clrTypeName)
             {
+                case "System.Byte":
+                case "Byte":
+                case "byte":
+                case "System.SByte":
+                case "SByte":
+                case "sbyte":
+                case "System.Int16":
+                case "Int16":
+                case "short":
+                case "System.UInt16":
+                case "UInt16":
+                case "ushort":
                 case "System.Int32":
                 case "Int32":
                 case "int":
                     return ScalarTypes.Int;
+                case "System.UInt32": // unsigned ints don't fit into int, use long
+                case "UInt32":
+                case "uint":
                 case "System.Int64":
                 case "Int64":
                 case "long":
@@ -232,6 +247,9 @@ namespace Kushy
                 case "double":
                 case "float":
                     return ScalarTypes.Real;
+                case "System.UInt64": // unsigned longs do not fit into long, use decimal
+                case "UInt64":
+                case "ulong":
                 case "System.Decimal":
                 case "Decimal":
                 case "decimal":
