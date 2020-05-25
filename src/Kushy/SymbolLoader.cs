@@ -392,8 +392,9 @@ namespace Kushy
             public bool IsCurrent;
             public string DatabaseAccessMode;
             public string PrettyName;
-            public bool CurrentUserIsUnrestrictedViewer;
-            public string DatabaseId;
+            public bool ReservedSlot1;
+            public Guid DatabaseId;
+            public string InTransitionTo;
         }
 
         public class ShowDatabaseSchemaResult
@@ -407,7 +408,7 @@ namespace Kushy
             public string PrettyName;
             public string Version;
             public string Folder;
-            public string DocName;
+            public string DocString;
         }
 
         public class ShowFunctionsResult
