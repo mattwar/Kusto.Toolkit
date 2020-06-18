@@ -377,12 +377,14 @@ namespace Kushy
             return _defaultConnection;
         }
 
+#if false
         private string GetDatabaseConnection(string connection, string databaseName)
         {
             var csb = new KustoConnectionStringBuilder(connection);
             csb.InitialCatalog = databaseName;
             return csb.ConnectionString;
         }
+#endif
 
         public class ShowDatabasesResult
         {
