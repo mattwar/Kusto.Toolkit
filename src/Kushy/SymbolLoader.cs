@@ -45,29 +45,97 @@ namespace Kushy
         }
 
         /// <summary>
-        /// Loads the schema for the specified databasea into a a <see cref="DatabaseSymbol"/>.
+        /// Loads the schema for the specified database into a <see cref="DatabaseSymbol"/>.
         /// </summary>
         public async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
-            var members = new List<Symbol>();
-
             var connection = GetClusterConnection(clusterName);
 
-            var tableSchemas = await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(connection, databaseName, $".show database {databaseName} schema", throwOnError, cancellationToken).ConfigureAwait(false);
-            if (tableSchemas == null)
+            var tables = await LoadTablesAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var externalTables = await LoadExternalTablesAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var materializedViews = await LoadMaterializedViewsAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var functions = await LoadFunctionsAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+
+            var members = new List<Symbol>();
+            members.AddRange(tables);
+            members.AddRange(externalTables);
+            members.AddRange(materializedViews);
+            members.AddRange(functions);
+
+            var databaseSymbol = new DatabaseSymbol(databaseName, members);
+            return databaseSymbol;
+        }
+
+        private async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(string connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        {
+            var tables = new List<TableSymbol>();
+
+            // get table schema from .show database xxx schema
+            var databaseSchemas = await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(connection, databaseName, $".show database {databaseName} schema", throwOnError, cancellationToken).ConfigureAwait(false);
+            if (databaseSchemas == null)
                 return null;
 
-            tableSchemas = tableSchemas
-                .Where(r => !string.IsNullOrEmpty(r.TableName) && !string.IsNullOrEmpty(r.ColumnName))
-                .ToArray();
-
-            foreach (var table in tableSchemas.GroupBy(s => s.TableName))
+            foreach (var table in databaseSchemas.Where(s => !string.IsNullOrEmpty(s.TableName)).GroupBy(s => s.TableName))
             {
-                var columns = table.Select(s => new ColumnSymbol(s.ColumnName, GetKustoType(s.ColumnType))).ToList();
-                var tableSymbol = new TableSymbol(table.Key, columns);
-                members.Add(tableSymbol);
+                var tableDocString = table.FirstOrDefault(t => string.IsNullOrEmpty(t.ColumnName) && !string.IsNullOrEmpty(t.DocString))?.DocString;
+                var columnSchemas = table.Where(t => !string.IsNullOrEmpty(t.ColumnName)).ToArray();
+                var columns = columnSchemas.Select(s => new ColumnSymbol(s.ColumnName, GetKustoType(s.ColumnType), s.DocString)).ToList();
+                var tableSymbol = new TableSymbol(table.Key, columns, tableDocString);
+                tables.Add(tableSymbol);
             }
 
+            return tables;
+        }
+
+        private async Task<IReadOnlyList<TableSymbol>> LoadExternalTablesAsync(string connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        {
+            var tables = new List<TableSymbol>();
+
+            // get external tables from .show external tables and .show external table xxx cslschema
+            var externalTables = await ExecuteControlCommandAsync<ShowExternalTablesResult>(connection, databaseName, ".show external tables", throwOnError, cancellationToken);
+            if (externalTables != null)
+            {
+                foreach (var et in externalTables)
+                {
+                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(connection, databaseName, $".show materialized-view {et.TableName} cslschema", throwOnError, cancellationToken);
+                    if (etSchemas != null && etSchemas.Length > 0)
+                    {
+                        var mvSymbol = new TableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString).WithIsExternal(true);
+                        tables.Add(mvSymbol);
+                    }
+                }
+            }
+
+            return tables;
+        }
+
+        private async Task<IReadOnlyList<TableSymbol>> LoadMaterializedViewsAsync(string connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        {
+            var tables = new List<TableSymbol>();
+
+            // get materialized views from .show materialized-views and .show materialized-view xxx cslschema
+            var materializedViews = await ExecuteControlCommandAsync<ShowMaterializedViewsResult>(connection, databaseName, ".show materialized-views", throwOnError, cancellationToken);
+            if (materializedViews != null)
+            {
+                foreach (var mv in materializedViews)
+                {
+                    var mvSchemas = await ExecuteControlCommandAsync<ShowMaterializedViewSchemaResult>(connection, databaseName, $".show materialized-view {mv.Name} cslschema", throwOnError, cancellationToken);
+                    if (mvSchemas != null && mvSchemas.Length > 0)
+                    {
+                        var mvSymbol = new TableSymbol(mv.Name, "(" + mvSchemas[0].Schema + ")", mv.DocString).WithIsMaterializedView(true);
+                        tables.Add(mvSymbol);
+                    }
+                }
+            }
+
+            return tables;
+        }
+
+        private async Task<IReadOnlyList<FunctionSymbol>> LoadFunctionsAsync(string connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        {
+            var functions = new List<FunctionSymbol>();
+
+            // get functions for .show functions
             var functionSchemas = await ExecuteControlCommandAsync<ShowFunctionsResult>(connection, databaseName, ".show functions", throwOnError, cancellationToken).ConfigureAwait(false);
             if (functionSchemas == null)
                 return null;
@@ -76,11 +144,10 @@ namespace Kushy
             {
                 var parameters = TranslateParameters(fun.Parameters);
                 var functionSymbol = new FunctionSymbol(fun.Name, fun.Body, parameters);
-                members.Add(functionSymbol);
+                functions.Add(functionSymbol);
             }
 
-            var databaseSymbol = new DatabaseSymbol(databaseName, members);
-            return databaseSymbol;
+            return functions;
         }
 
         /// <summary>
@@ -114,12 +181,12 @@ namespace Kushy
             if (cluster == null)
             {
                 cluster = new ClusterSymbol(clusterHost, new[] { db }, isOpen: true);
-                globals = globals.AddOrUpdateCluster(cluster);
+                globals = globals.WithClusterList(globals.Clusters.Concat(new[] { cluster }).ToArray());
             }
             else
             {
                 cluster = cluster.AddOrUpdateDatabase(db);
-                globals = globals.AddOrUpdateCluster(cluster);
+                globals = globals.WithClusterList(globals.Clusters.Select(c => c.Name == cluster.Name ? cluster : c).ToArray());
             }
 
             if (asDefault)
@@ -178,7 +245,7 @@ namespace Kushy
                         // initially populate with empty 'open' databases. These will get updated to full schema if referenced
                         var databases = databaseNames.Select(db => new DatabaseSymbol(db, null, isOpen: true)).ToArray();
                         cluster = new ClusterSymbol(clusterRef.Cluster, databases);
-                        globals = globals.AddOrUpdateCluster(cluster);
+                        globals = globals.WithClusterList(globals.Clusters.Concat(new[] { cluster }).ToArray());
                     }
                 }
                 else
@@ -305,15 +372,26 @@ namespace Kushy
             var query = "let fn = " + parameters + " { };";
             var code = KustoCode.ParseAndAnalyze(query);
             var let = code.Syntax.GetFirstDescendant<LetStatement>();
-            var variable = let.Name.ReferencedSymbol as VariableSymbol;
-            var function = variable.Type as FunctionSymbol;
-            return function.Signatures[0].Parameters;
+
+            if (let.Name.ReferencedSymbol is FunctionSymbol fs)
+            {
+                return fs.Signatures[0].Parameters;
+            }
+            else if (let.Name.ReferencedSymbol is VariableSymbol vs
+                && vs.Type is FunctionSymbol vfs)
+            {
+                return vfs.Signatures[0].Parameters;
+            }
+            else
+            {
+                return NoParameters;
+            }
         }
 
         /// <summary>
         /// Executes a query or command against a kusto cluster and returns a sequence of result row instances.
         /// </summary>
-        private static async Task<IEnumerable<T>> ExecuteControlCommandAsync<T>(string connection, string database, string command, bool throwOnError, CancellationToken cancellationToken)
+        private static async Task<T[]> ExecuteControlCommandAsync<T>(string connection, string database, string command, bool throwOnError, CancellationToken cancellationToken)
         {
             try
             {
@@ -323,7 +401,7 @@ namespace Kushy
                     var results = KustoDataReaderParser.ParseV1(resultReader, null);
                     var tableReader = results[WellKnownDataSet.PrimaryResult].Single().TableData.CreateDataReader();
                     var objectReader = new ObjectReader<T>(tableReader);
-                    return objectReader;
+                    return objectReader.ToArray();
                 }
             }
             catch (Exception) when (!throwOnError)
@@ -377,15 +455,6 @@ namespace Kushy
             return _defaultConnection;
         }
 
-#if false
-        private string GetDatabaseConnection(string connection, string databaseName)
-        {
-            var csb = new KustoConnectionStringBuilder(connection);
-            csb.InitialCatalog = databaseName;
-            return csb.ConnectionString;
-        }
-#endif
-
         public class ShowDatabasesResult
         {
             public string DatabaseName;
@@ -411,6 +480,30 @@ namespace Kushy
             public string Version;
             public string Folder;
             public string DocString;
+        }
+
+        public class ShowExternalTablesResult
+        {
+            public string TableName;
+            public string DocString;
+        }
+
+        public class ShowExternalTableSchemaResult
+        {
+            public string TableName;
+            public string Schema;
+        }
+
+        public class ShowMaterializedViewsResult
+        {
+            public string Name;
+            public string DocString;
+        }
+
+        public class ShowMaterializedViewSchemaResult
+        {
+            public string Name;
+            public string Schema;
         }
 
         public class ShowFunctionsResult

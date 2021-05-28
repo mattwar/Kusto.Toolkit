@@ -20,7 +20,10 @@ namespace KushyTests
             var loader = new SymbolLoader(HelpConnection);
             var dbSymbol = await loader.LoadDatabaseAsync("Samples");
             Assert.IsNotNull(dbSymbol);
-            Assert.IsTrue(dbSymbol.Members.Count > 0);
+            Assert.IsTrue(dbSymbol.Members.Count > 0, "members count");
+            Assert.IsTrue(dbSymbol.Tables.Count > 0, "tables count");
+            Assert.IsTrue(dbSymbol.MaterializedViews.Count > 0, "materialized views count");
+            Assert.IsTrue(dbSymbol.Functions.Count > 0, "functions count");
         }
 
         [TestMethod]
