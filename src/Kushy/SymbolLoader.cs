@@ -418,41 +418,33 @@ namespace Kushy
             return uri.Host;
         }
 
-        private string GetClusterConnection(string clusterName)
+        private static readonly string KustoWindowsNet = ".kusto.windows.net";
+
+        private string GetClusterConnection(string clusterUriOrName)
         {
-            if (!string.IsNullOrEmpty(clusterName))
+            if (string.IsNullOrEmpty(clusterUriOrName))
             {
-                var csb = new KustoConnectionStringBuilder(_defaultConnection);
-                var defaultUri = new Uri(csb.DataSource);
-
-                if (Uri.TryCreate(clusterName, UriKind.Absolute, out var clusterUri))
-                {
-                    if (string.Compare(clusterUri.Host, defaultUri.Host, ignoreCase: true) != 0)
-                    {
-                        csb.DataSource = clusterName;
-                        return csb.ConnectionString;
-                    }
-                }
-                else
-                {
-                    var host = clusterName;
-
-                    if (!host.Contains('.'))
-                    {
-                        host += ".kusto.windows.net";
-                    }
-
-                    if (string.Compare(host, defaultUri.Host, ignoreCase: true) != 0)
-                    {
-                        var scheme = clusterUri.Scheme;
-                        var port = clusterUri.Port != 0 ? clusterUri.Port : 0;
-                        csb.DataSource = scheme + "://" + host + (port != 0 ? ":" + port : "");
-                        return csb.ConnectionString;
-                    }
-                }
+                return _defaultConnection;
             }
 
-            return _defaultConnection;
+            // borrow most security settings from default cluster connection
+            var builder = new KustoConnectionStringBuilder(_defaultConnection);
+
+            if (string.IsNullOrWhiteSpace(clusterUriOrName))
+                return null;
+
+            var clusterUri = clusterUriOrName;
+
+            if (!clusterUri.Contains('.'))
+                clusterUri += KustoWindowsNet;
+
+            if (!clusterUri.Contains("://"))
+                clusterUri = builder.ConnectionScheme + "://" + clusterUri;
+
+            builder.DataSource = clusterUri;
+            builder.InitialCatalog = "NetDefaultDB";
+
+            return builder.ConnectionString;
         }
 
         public class ShowDatabasesResult
