@@ -20,7 +20,9 @@ namespace Kushy
     public class SymbolLoader
     {
         private readonly string _defaultConnection;
+        private readonly string _defaultClusterName;
         private readonly HashSet<string> _ignoreClusterNames = new HashSet<string>();
+        private readonly Dictionary<string, HashSet<string>> _badDatabaseNameMap = new Dictionary<string, HashSet<string>>();
 
         /// <summary>
         /// Creates a new <see cref="SymbolLoader"/> instance.
@@ -28,7 +30,8 @@ namespace Kushy
         /// <param name="clusterConnection">The cluster connection string.</param>
         public SymbolLoader(string clusterConnection)
         {
-            this._defaultConnection = clusterConnection;
+            _defaultConnection = clusterConnection;
+            _defaultClusterName = GetHost(clusterConnection);
         }
 
         /// <summary>
@@ -49,9 +52,27 @@ namespace Kushy
         /// </summary>
         public async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
+            clusterName = clusterName ?? _defaultClusterName;
+
+            // if we've already determined this database name is bad, then bail out
+            if (_badDatabaseNameMap.TryGetValue(clusterName, out var badDbNames)
+                && badDbNames.Contains(databaseName))
+                return null;
+
             var connection = GetClusterConnection(clusterName);
 
             var tables = await LoadTablesAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            if (tables == null)
+            {
+                if (badDbNames == null)
+                {
+                    badDbNames = new HashSet<string>();
+                    _badDatabaseNameMap.Add(clusterName, badDbNames);
+                }
+                badDbNames.Add(databaseName);
+                return null;
+            }
+
             var externalTables = await LoadExternalTablesAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
             var materializedViews = await LoadMaterializedViewsAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
             var functions = await LoadFunctionsAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
@@ -97,7 +118,7 @@ namespace Kushy
             {
                 foreach (var et in externalTables)
                 {
-                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(connection, databaseName, $".show materialized-view {et.TableName} cslschema", throwOnError, cancellationToken);
+                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(connection, databaseName, $".show external tables {et.TableName} cslschema", throwOnError, cancellationToken);
                     if (etSchemas != null && etSchemas.Length > 0)
                     {
                         var mvSymbol = new TableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString).WithIsExternal(true);
@@ -180,7 +201,7 @@ namespace Kushy
             var cluster = globals.GetCluster(clusterHost);
             if (cluster == null)
             {
-                cluster = new ClusterSymbol(clusterHost, new[] { db }, isOpen: true);
+                cluster = new ClusterSymbol(clusterHost, new[] { db });
                 globals = globals.WithClusterList(globals.Clusters.Concat(new[] { cluster }).ToArray());
             }
             else
@@ -248,11 +269,9 @@ namespace Kushy
                         globals = globals.WithClusterList(globals.Clusters.Concat(new[] { cluster }).ToArray());
                     }
                 }
-                else
-                {
-                    // we already have all the schema for this cluster
-                    _ignoreClusterNames.Add(clusterRef.Cluster);
-                }
+
+                // we already have all the known schema for this cluster
+                _ignoreClusterNames.Add(clusterRef.Cluster);
             }
 
             // examine all explicit database(xxx) references
@@ -412,7 +431,11 @@ namespace Kushy
 
         private string GetClusterHost(string clusterName)
         {
-            var connection = GetClusterConnection(clusterName);
+            return GetHost(GetClusterConnection(clusterName));
+        }
+
+        private string GetHost(string connection)
+        {
             var csb = new KustoConnectionStringBuilder(connection);
             var uri = new Uri(csb.DataSource);
             return uri.Host;
@@ -422,7 +445,8 @@ namespace Kushy
 
         private string GetClusterConnection(string clusterUriOrName)
         {
-            if (string.IsNullOrEmpty(clusterUriOrName))
+            if (string.IsNullOrEmpty(clusterUriOrName)
+                || clusterUriOrName == _defaultClusterName)
             {
                 return _defaultConnection;
             }

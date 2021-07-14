@@ -27,6 +27,14 @@ namespace KushyTests
         }
 
         [TestMethod]
+        public async Task TestLoadDatabaseAsync_BadDatabaseName()
+        {
+            var loader = new SymbolLoader(HelpConnection);
+            var dbSymbol = await loader.LoadDatabaseAsync("not-a-db");
+            Assert.IsNull(dbSymbol);
+        }
+
+        [TestMethod]
         public async Task TestGetDatabaseNamesAsync()
         {
             var loader = new SymbolLoader(HelpConnection);
