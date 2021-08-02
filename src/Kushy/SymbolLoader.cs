@@ -42,11 +42,41 @@ namespace Kushy
             var connection = GetClusterConnection(clusterName);
             var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(connection, "", ".show databases", throwOnError, cancellationToken);
             if (databases == null)
-                return null;
+            {
+                throw new Exception("No databases found for cluster or No access to the cluster: " + clusterName);
+            }
 
             return databases.Select(d => d.DatabaseName).ToArray();
         }
 
+        /// <summary>
+        /// checks for equivalent named clusters in current loaded globals
+        /// </summary>
+        public ClusterSymbol GetClusterSymbolFromGlobals(string clusterName, GlobalState globals)
+        {
+            foreach (var Cluster in globals.Clusters)
+            {
+                if (Cluster.Name.Contains(clusterName))
+                    return Cluster;
+            }
+            return null;
+        }
+        /// <summary>
+        /// checks for equivalent named database in current loaded globals
+        /// to avoid multiple network calls for same db name.
+        /// </summary>
+        public DatabaseSymbol GetDbSymbolFromGlobals(string dbName, GlobalState globals)
+        {
+            foreach (var Cluster in globals.Clusters)
+            {
+                foreach (var Database in Cluster.Databases)
+                {
+                    if (Database.Name.Equals(dbName))
+                        return Database;
+                }
+            }
+            return null;
+        }
         /// <summary>
         /// Loads the schema for the specified database into a <see cref="DatabaseSymbol"/>.
         /// </summary>
@@ -77,6 +107,10 @@ namespace Kushy
             var materializedViews = await LoadMaterializedViewsAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
             var functions = await LoadFunctionsAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
 
+            if(tables.Count==0 && externalTables.Count==0 && materializedViews.Count==0 && functions.Count==0)
+            {
+                return null;
+            }
             var members = new List<Symbol>();
             members.AddRange(tables);
             members.AddRange(externalTables);
@@ -94,7 +128,7 @@ namespace Kushy
             // get table schema from .show database xxx schema
             var databaseSchemas = await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(connection, databaseName, $".show database {databaseName} schema", throwOnError, cancellationToken).ConfigureAwait(false);
             if (databaseSchemas == null)
-                return null;
+                return tables;
 
             foreach (var table in databaseSchemas.Where(s => !string.IsNullOrEmpty(s.TableName)).GroupBy(s => s.TableName))
             {
@@ -159,7 +193,7 @@ namespace Kushy
             // get functions for .show functions
             var functionSchemas = await ExecuteControlCommandAsync<ShowFunctionsResult>(connection, databaseName, ".show functions", throwOnError, cancellationToken).ConfigureAwait(false);
             if (functionSchemas == null)
-                return null;
+                return functions;
 
             foreach (var fun in functionSchemas)
             {
@@ -194,7 +228,9 @@ namespace Kushy
         {
             var db = await LoadDatabaseAsync(databaseName, clusterName, throwOnError, cancellation).ConfigureAwait(false);
             if (db == null)
-                return globals;
+            {
+                throw new Exception("Database doesn't exist or No Access to Database: " + databaseName);
+            }
 
             var clusterHost = GetClusterHost(clusterName);
 
@@ -263,9 +299,10 @@ namespace Kushy
                     var databaseNames = await GetDatabaseNamesAsync(clusterRef.Cluster).ConfigureAwait(false);
                     if (databaseNames != null)
                     {
+                        var clusterHost = GetClusterHost(clusterRef.Cluster);
                         // initially populate with empty 'open' databases. These will get updated to full schema if referenced
                         var databases = databaseNames.Select(db => new DatabaseSymbol(db, null, isOpen: true)).ToArray();
-                        cluster = new ClusterSymbol(clusterRef.Cluster, databases);
+                        cluster = new ClusterSymbol(clusterHost, databases);
                         globals = globals.WithClusterList(globals.Clusters.Concat(new[] { cluster }).ToArray());
                     }
                 }
@@ -276,6 +313,7 @@ namespace Kushy
 
             // examine all explicit database(xxx) references
             var dbRefs = service.GetDatabaseReferences(cancellationToken);
+            GlobalState newGlobals;
             foreach (DatabaseReference dbRef in dbRefs)
             {
                 // get implicit or explicit named cluster
@@ -285,11 +323,14 @@ namespace Kushy
                 {
                     // look for existing database of this name
                     var db = cluster.Databases.FirstOrDefault(m => m.Name == dbRef.Database);
-
+                    if(db == null)
+                    {
+                        db = cluster.GetDatabase(dbRef.Database);
+                    }
                     // is this one of those not-yet-populated databases?
                     if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
                     {
-                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, asDefault: false, throwOnError: false, cancellationToken).ConfigureAwait(false);
+                        newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, asDefault: false, throwOnError: false, cancellationToken).ConfigureAwait(false);
                         globals = newGlobals != null ? newGlobals : globals;
                     }
                 }
