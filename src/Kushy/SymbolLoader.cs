@@ -285,12 +285,12 @@ namespace Kushy
                 if (cluster != null)
                 {
                     // look for existing database of this name
-                    var db = cluster.Databases.FirstOrDefault(m => m.Name == dbRef.Database);
+                    var db = cluster.Databases.FirstOrDefault(m => m.Name == dbRef.Database.ToLower());
 
                     // is this one of those not-yet-populated databases?
                     if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
                     {
-                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, asDefault: false, throwOnError: false, cancellationToken).ConfigureAwait(false);
+                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database.ToLower(), cluster.Name, asDefault: false, throwOnError: false, cancellationToken).ConfigureAwait(false);
                         globals = newGlobals != null ? newGlobals : globals;
                     }
                 }
