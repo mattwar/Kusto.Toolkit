@@ -221,23 +221,23 @@ namespace Kushy
         /// <summary>
         /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the query but not already present in the <see cref="GlobalState"/>.
         /// </summary>
-        public async Task<KustoCode> AddReferencedDatabasesAsync(KustoCode code, CancellationToken cancellationToken = default)
+        public async Task<KustoCode> AddReferencedDatabasesAsync(KustoCode code, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
             var service = new KustoCodeService(code);
-            var globals = await AddReferencedDatabasesAsync(code.Globals, service, cancellationToken).ConfigureAwait(false);
+            var globals = await AddReferencedDatabasesAsync(code.Globals, service, throwOnError, cancellationToken).ConfigureAwait(false);
             return code.WithGlobals(globals);
         }
 
         /// <summary>
         /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the <see cref="CodeScript"/ document but not already present in the <see cref="GlobalState"/>.
         /// </summary>
-        public async Task<CodeScript> AddReferencedDatabasesAsync(CodeScript script, CancellationToken cancellationToken = default)
+        public async Task<CodeScript> AddReferencedDatabasesAsync(CodeScript script, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
             var globals = script.Globals;
 
             foreach (var block in script.Blocks)
             {
-                globals = await AddReferencedDatabasesAsync(globals, block.Service, cancellationToken).ConfigureAwait(false);
+                globals = await AddReferencedDatabasesAsync(globals, block.Service, throwOnError, cancellationToken).ConfigureAwait(false);
             }
 
             return script.WithGlobals(globals);
@@ -246,7 +246,7 @@ namespace Kushy
         /// <summary>
         /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the query but not already present in the <see cref="GlobalState"/>.
         /// </summary>
-        private async Task<GlobalState> AddReferencedDatabasesAsync(GlobalState globals, CodeService service, CancellationToken cancellationToken = default)
+        private async Task<GlobalState> AddReferencedDatabasesAsync(GlobalState globals, CodeService service, bool throwOnError = false,CancellationToken cancellationToken = default)
         {
             // find all explicit cluster (xxx) references
             var clusterRefs = service.GetClusterReferences(cancellationToken);
@@ -260,7 +260,7 @@ namespace Kushy
                 if (cluster == null || cluster.IsOpen)
                 {
                     // check to see if this is an actual cluster and get all database names
-                    var databaseNames = await GetDatabaseNamesAsync(clusterRef.Cluster, true).ConfigureAwait(false);
+                    var databaseNames = await GetDatabaseNamesAsync(clusterRef.Cluster, throwOnError).ConfigureAwait(false);
                     if (databaseNames != null)
                     {
                         var clusterHost = GetClusterHost(clusterRef.Cluster);
@@ -285,12 +285,12 @@ namespace Kushy
                 if (cluster != null)
                 {
                     // look for existing database of this name
-                    var db = cluster.Databases.FirstOrDefault(m => m.Name == dbRef.Database.ToLower());
+                    var db = cluster.Databases.FirstOrDefault(m => m.Name.Equals(dbRef.Database, StringComparison.OrdinalIgnoreCase));
 
                     // is this one of those not-yet-populated databases?
                     if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
                     {
-                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database.ToLower(), cluster.Name, asDefault: false, throwOnError: false, cancellationToken).ConfigureAwait(false);
+                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, asDefault: false, throwOnError: true, cancellationToken).ConfigureAwait(false);
                         globals = newGlobals != null ? newGlobals : globals;
                     }
                 }
