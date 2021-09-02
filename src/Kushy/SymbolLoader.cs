@@ -290,7 +290,7 @@ namespace Kushy
                     // is this one of those not-yet-populated databases?
                     if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
                     {
-                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, asDefault: false, throwOnError: true, cancellationToken).ConfigureAwait(false);
+                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, asDefault: false, throwOnError, cancellationToken).ConfigureAwait(false);
                         globals = newGlobals != null ? newGlobals : globals;
                     }
                 }
