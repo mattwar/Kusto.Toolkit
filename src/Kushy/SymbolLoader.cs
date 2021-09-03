@@ -118,7 +118,7 @@ namespace Kushy
             {
                 foreach (var et in externalTables)
                 {
-                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(connection, databaseName, $".show external tables {et.TableName} cslschema", throwOnError, cancellationToken);
+                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(connection, databaseName, $".show external table {et.TableName} cslschema", throwOnError, cancellationToken);
                     if (etSchemas != null && etSchemas.Length > 0)
                     {
                         var mvSymbol = new TableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString).WithIsExternal(true);
@@ -333,6 +333,8 @@ namespace Kushy
                 case "Double":
                 case "double":
                 case "float":
+                case "System.single":
+                case "System.Single":
                     return ScalarTypes.Real;
                 case "System.UInt64": // unsigned longs do not fit into long, use decimal
                 case "UInt64":
