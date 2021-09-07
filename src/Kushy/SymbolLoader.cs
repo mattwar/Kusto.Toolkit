@@ -28,11 +28,8 @@ namespace Kushy
         /// Creates a new <see cref="SymbolLoader"/> instance. recommended method: SymbolLoader(KustoConnectionStringBuilder clusterConnection)
         /// </summary>
         /// <param name="clusterConnection">The cluster connection string.</param>
-        public SymbolLoader(string strClusterConnection)
+        public SymbolLoader(string strClusterConnection) : this(new KustoConnectionStringBuilder(strClusterConnection))
         {
-            KustoConnectionStringBuilder clusterConnection = new KustoConnectionStringBuilder(strClusterConnection);
-            _defaultConnection = clusterConnection;
-            _defaultClusterName = GetHost(clusterConnection);
         }
 
         /// <summary>
