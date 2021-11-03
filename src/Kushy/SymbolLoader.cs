@@ -19,20 +19,32 @@ namespace Kushy
     /// </summary>
     public class SymbolLoader
     {
-        private readonly string _defaultConnection;
+        private readonly KustoConnectionStringBuilder _defaultConnection;
         private readonly string _defaultClusterName;
         private readonly string _defaultDomain;
         private readonly HashSet<string> _ignoreClusterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, HashSet<string>> _badDatabaseNameMap = new Dictionary<string, HashSet<string>>();
 
         /// <summary>
-        /// Creates a new <see cref="SymbolLoader"/> instance.
+        /// Creates a new <see cref="SymbolLoader"/> instance. recommended method: SymbolLoader(KustoConnectionStringBuilder clusterConnection)
         /// </summary>
         /// <param name="clusterConnection">The cluster connection string.</param>
         /// <param name="defaultDomain">The domain used to convert short cluster host names into full cluster host names.
         /// This string must start with a dot.  If not specified, the default domain is ".Kusto.Windows.Net"
         /// </param>
         public SymbolLoader(string clusterConnection, string defaultDomain = null)
+            : this(new KustoConnectionStringBuilder(clusterConnection), defaultDomain)
+        {
+        }
+
+        /// <summary>
+        /// Creates a new <see cref="SymbolLoader"/> instance.
+        /// </summary>
+        /// <param name="clusterConnection">The cluster connection.</param>
+        /// <param name="defaultDomain">The domain used to convert short cluster host names into full cluster host names.
+        /// This string must start with a dot.  If not specified, the default domain is ".Kusto.Windows.Net"
+        /// </param>
+        public SymbolLoader(KustoConnectionStringBuilder clusterConnection, string defaultDomain = null)
         {
             _defaultConnection = clusterConnection;
             _defaultClusterName = GetHost(clusterConnection);
@@ -100,7 +112,7 @@ namespace Kushy
             return databaseSymbol;
         }
 
-        private async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(string connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        private async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(KustoConnectionStringBuilder connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
             var tables = new List<TableSymbol>();
 
@@ -121,7 +133,7 @@ namespace Kushy
             return tables;
         }
 
-        private async Task<IReadOnlyList<TableSymbol>> LoadExternalTablesAsync(string connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        private async Task<IReadOnlyList<TableSymbol>> LoadExternalTablesAsync(KustoConnectionStringBuilder connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
             var tables = new List<TableSymbol>();
 
@@ -143,7 +155,7 @@ namespace Kushy
             return tables;
         }
 
-        private async Task<IReadOnlyList<TableSymbol>> LoadMaterializedViewsAsync(string connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        private async Task<IReadOnlyList<TableSymbol>> LoadMaterializedViewsAsync(KustoConnectionStringBuilder connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
             var tables = new List<TableSymbol>();
 
@@ -165,7 +177,7 @@ namespace Kushy
             return tables;
         }
 
-        private async Task<IReadOnlyList<FunctionSymbol>> LoadFunctionsAsync(string connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        private async Task<IReadOnlyList<FunctionSymbol>> LoadFunctionsAsync(KustoConnectionStringBuilder connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
             var functions = new List<FunctionSymbol>();
 
@@ -435,7 +447,7 @@ namespace Kushy
         /// <summary>
         /// Executes a query or command against a kusto cluster and returns a sequence of result row instances.
         /// </summary>
-        private static async Task<T[]> ExecuteControlCommandAsync<T>(string connection, string database, string command, bool throwOnError, CancellationToken cancellationToken)
+        private static async Task<T[]> ExecuteControlCommandAsync<T>(KustoConnectionStringBuilder connection, string database, string command, bool throwOnError, CancellationToken cancellationToken)
         {
             try
             {
@@ -464,14 +476,14 @@ namespace Kushy
             return GetHost(GetClusterConnection(clusterName));
         }
 
-        private string GetHost(string connection)
+        private string GetHost(KustoConnectionStringBuilder connection)
         {
-            var csb = new KustoConnectionStringBuilder(connection);
-            var uri = new Uri(csb.DataSource);
+            //var csb = new KustoConnectionStringBuilder(connection);
+            var uri = new Uri(connection.DataSource);
             return uri.Host;
         }
 
-        private string GetClusterConnection(string clusterUriOrName)
+        private KustoConnectionStringBuilder GetClusterConnection(string clusterUriOrName)
         {
             if (string.IsNullOrEmpty(clusterUriOrName)
                 || clusterUriOrName == _defaultClusterName)
@@ -493,9 +505,11 @@ namespace Kushy
                 clusterUri = builder.ConnectionScheme + "://" + clusterUri;
 
             builder.DataSource = clusterUri;
+            builder.ApplicationCertificateBlob = _defaultConnection.ApplicationCertificateBlob;
+            builder.ApplicationKey = _defaultConnection.ApplicationKey;
             builder.InitialCatalog = "NetDefaultDB";
 
-            return builder.ConnectionString;
+            return builder;
         }
 
         public class ShowDatabasesResult
