@@ -21,17 +21,24 @@ namespace Kushy
     {
         private readonly string _defaultConnection;
         private readonly string _defaultClusterName;
-        private readonly HashSet<string> _ignoreClusterNames = new HashSet<string>();
+        private readonly string _defaultDomain;
+        private readonly HashSet<string> _ignoreClusterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, HashSet<string>> _badDatabaseNameMap = new Dictionary<string, HashSet<string>>();
 
         /// <summary>
         /// Creates a new <see cref="SymbolLoader"/> instance.
         /// </summary>
         /// <param name="clusterConnection">The cluster connection string.</param>
-        public SymbolLoader(string clusterConnection)
+        /// <param name="defaultDomain">The domain used to convert short cluster host names into full cluster host names.
+        /// This string must start with a dot.  If not specified, the default domain is ".Kusto.Windows.Net"
+        /// </param>
+        public SymbolLoader(string clusterConnection, string defaultDomain = null)
         {
             _defaultConnection = clusterConnection;
             _defaultClusterName = GetHost(clusterConnection);
+            _defaultDomain = String.IsNullOrEmpty(defaultDomain) 
+                ? KustoFacts.KustoWindowsNet
+                : defaultDomain;
         }
 
         /// <summary>
@@ -39,6 +46,10 @@ namespace Kushy
         /// </summary>
         public async Task<string[]> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
+            clusterName = string.IsNullOrEmpty(clusterName)
+                ? _defaultClusterName
+                : GetFullHostName(clusterName);
+
             var connection = GetClusterConnection(clusterName);
             var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(connection, "", ".show databases", throwOnError, cancellationToken);
             if (databases == null)
@@ -52,7 +63,9 @@ namespace Kushy
         /// </summary>
         public async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
-            clusterName = clusterName ?? _defaultClusterName;
+            clusterName = string.IsNullOrEmpty(clusterName)
+                ? _defaultClusterName
+                : GetFullHostName(clusterName);
 
             // if we've already determined this database name is bad, then bail out
             if (_badDatabaseNameMap.TryGetValue(clusterName, out var badDbNames)
@@ -192,22 +205,24 @@ namespace Kushy
         /// </summary>
         private async Task<GlobalState> AddOrUpdateDatabaseAsync(GlobalState globals, string databaseName, string clusterName, bool asDefault, bool throwOnError, CancellationToken cancellation)
         {
+            clusterName = string.IsNullOrEmpty(clusterName)
+                ? _defaultClusterName
+                : GetFullHostName(clusterName);
+
             var db = await LoadDatabaseAsync(databaseName, clusterName, throwOnError, cancellation).ConfigureAwait(false);
             if (db == null)
                 return globals;
 
-            var clusterHost = GetClusterHost(clusterName);
-
-            var cluster = globals.GetCluster(clusterHost);
+            var cluster = globals.GetCluster(clusterName);
             if (cluster == null)
             {
-                cluster = new ClusterSymbol(clusterHost, new[] { db });
-                globals = globals.WithClusterList(globals.Clusters.Concat(new[] { cluster }).ToArray());
+                cluster = new ClusterSymbol(clusterName, new[] { db });
+                globals = globals.AddOrReplaceCluster(cluster);
             }
             else
             {
                 cluster = cluster.AddOrUpdateDatabase(db);
-                globals = globals.WithClusterList(globals.Clusters.Select(c => c.Name == cluster.Name ? cluster : c).ToArray());
+                globals = globals.AddOrReplaceCluster(cluster);
             }
 
             if (asDefault)
@@ -252,35 +267,42 @@ namespace Kushy
             var clusterRefs = service.GetClusterReferences(cancellationToken);
             foreach (ClusterReference clusterRef in clusterRefs)
             {
+                var clusterName = GetFullHostName(clusterRef.Cluster);
+
                 // don't bother with cluster names that we've already shown to not exist
-                if (_ignoreClusterNames.Contains(clusterRef.Cluster))
+                if (_ignoreClusterNames.Contains(clusterName))
                     continue;
 
-                var cluster = globals.GetCluster(clusterRef.Cluster);
+                var cluster = globals.GetCluster(clusterName);
                 if (cluster == null || cluster.IsOpen)
                 {
                     // check to see if this is an actual cluster and get all database names
-                    var databaseNames = await GetDatabaseNamesAsync(clusterRef.Cluster, throwOnError).ConfigureAwait(false);
+                    var databaseNames = await GetDatabaseNamesAsync(clusterName, throwOnError).ConfigureAwait(false);
                     if (databaseNames != null)
                     {
-                        var clusterHost = GetClusterHost(clusterRef.Cluster);
                         // initially populate with empty 'open' databases. These will get updated to full schema if referenced
                         var databases = databaseNames.Select(db => new DatabaseSymbol(db, null, isOpen: true)).ToArray();
-                        cluster = new ClusterSymbol(clusterHost, databases);
+                        cluster = new ClusterSymbol(clusterName, databases);
                         globals = globals.WithClusterList(globals.Clusters.Concat(new[] { cluster }).ToArray());
                     }
                 }
 
                 // we already have all the known schema for this cluster
-                _ignoreClusterNames.Add(clusterRef.Cluster);
+                _ignoreClusterNames.Add(clusterName);
             }
 
             // examine all explicit database(xxx) references
             var dbRefs = service.GetDatabaseReferences(cancellationToken);
             foreach (DatabaseReference dbRef in dbRefs)
             {
+                var clusterName = string.IsNullOrEmpty(dbRef.Cluster)
+                    ? null
+                    : GetFullHostName(dbRef.Cluster);
+
                 // get implicit or explicit named cluster
-                var cluster = string.IsNullOrEmpty(dbRef.Cluster) ? globals.Cluster : globals.GetCluster(dbRef.Cluster);
+                var cluster = string.IsNullOrEmpty(clusterName) 
+                    ? globals.Cluster 
+                    : globals.GetCluster(clusterName);
 
                 if (cluster != null)
                 {
@@ -290,7 +312,7 @@ namespace Kushy
                     // is this one of those not-yet-populated databases?
                     if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
                     {
-                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, asDefault: false, throwOnError, cancellationToken).ConfigureAwait(false);
+                        var newGlobals = await AddOrUpdateDatabaseAsync(globals, dbRef.Database, clusterName, asDefault: false, throwOnError, cancellationToken).ConfigureAwait(false);
                         globals = newGlobals != null ? newGlobals : globals;
                     }
                 }
@@ -432,6 +454,11 @@ namespace Kushy
             }
         }
 
+        private string GetFullHostName(string clusterNameOrUri)
+        {
+            return KustoFacts.GetFullHostName(KustoFacts.GetHostName(clusterNameOrUri), _defaultDomain);
+        }
+
         private string GetClusterHost(string clusterName)
         {
             return GetHost(GetClusterConnection(clusterName));
@@ -443,8 +470,6 @@ namespace Kushy
             var uri = new Uri(csb.DataSource);
             return uri.Host;
         }
-
-        private static readonly string KustoWindowsNet = ".kusto.windows.net";
 
         private string GetClusterConnection(string clusterUriOrName)
         {
@@ -462,8 +487,7 @@ namespace Kushy
 
             var clusterUri = clusterUriOrName;
 
-            if (!clusterUri.Contains('.'))
-                clusterUri += KustoWindowsNet;
+            clusterUri = KustoFacts.GetFullHostName(clusterUri, _defaultDomain);
 
             if (!clusterUri.Contains("://"))
                 clusterUri = builder.ConnectionScheme + "://" + clusterUri;

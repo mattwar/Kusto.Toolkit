@@ -39,8 +39,7 @@ namespace KushyTests
         {
             var loader = new SymbolLoader(HelpConnection);
             var names = await loader.GetDatabaseNamesAsync();
-            Assert.AreEqual(1, names.Length);
-            Assert.AreEqual("Samples", names[0]);
+            Assert.IsTrue(names.Contains("Samples"));
         }
 
         [TestMethod]
@@ -160,6 +159,36 @@ namespace KushyTests
             // find StormEvents table in Samples database
             var samples = newScript.Globals.Cluster.Databases.First(db => db.Name == "Samples");
             var storm = samples.GetTable("StormEvents");
+        }
+
+        [TestMethod]
+        public async Task TestAddReferencedDatabasesAsync_ClusterShortName()
+        {
+            var loader = new SymbolLoader(HelpConnection);
+
+            // set default database to database other than Samples.
+            var globals = await loader.AddOrUpdateDefaultDatabaseAsync(GlobalState.Default, "KustoMonitoringPersistentDatabase");
+
+            // just one database should exist
+            Assert.AreEqual(1, globals.Cluster.Databases.Count);
+
+            // parse query that has explicit reference to Samples database.
+            var code = KustoCode.ParseAndAnalyze("cluster('Help').database('Samples').StormEvents", globals);
+
+            // use loader to add symbols for any explicity referenced databases
+            var newCode = await loader.AddReferencedDatabasesAsync(code);
+
+            // both databases should exist now
+            Assert.AreEqual(2, newCode.Globals.Cluster.Databases.Count);
+
+            // find StormEvents table in Samples database
+            var samples = newCode.Globals.Cluster.Databases.First(db => db.Name == "Samples");
+            var storm = samples.Members.First(m => m.Name == "StormEvents");
+
+            // verify that query expression returns StormEvents table
+            var qb = (QueryBlock)newCode.Syntax;
+            var expr = (qb.Statements[qb.Statements.Count - 1].Element as ExpressionStatement).Expression;
+            Assert.AreSame(storm, expr.ResultType);
         }
     }
 }
