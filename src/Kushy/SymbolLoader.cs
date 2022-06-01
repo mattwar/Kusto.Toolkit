@@ -222,8 +222,7 @@ namespace Kushy
 
             foreach (var fun in functionSchemas)
             {
-                var parameters = TranslateParameters(fun.Parameters);
-                var functionSymbol = new FunctionSymbol(fun.Name, fun.Body, parameters);
+                var functionSymbol = new FunctionSymbol(fun.Name, fun.Parameters, fun.Body, fun.DocString);
                 functions.Add(functionSymbol);
             }
 
@@ -439,42 +438,6 @@ namespace Kushy
                     return ScalarTypes.Type;
                 default:
                     throw new InvalidOperationException($"Unhandled clr type: {clrTypeName}");
-            }
-        }
-
-        private static IReadOnlyList<Parameter> NoParameters = new Parameter[0];
-
-        /// <summary>
-        /// Translate Kusto parameter list declaration into into list of <see cref="Parameter"/> instances.
-        /// </summary>
-        private static IReadOnlyList<Parameter> TranslateParameters(string parameters)
-        {
-            parameters = parameters.Trim();
-
-            if (string.IsNullOrEmpty(parameters) || parameters == "()")
-                return NoParameters;
-
-            if (parameters[0] != '(')
-                parameters = "(" + parameters;
-            if (parameters[parameters.Length - 1] != ')')
-                parameters = parameters + ")";
-
-            var query = "let fn = " + parameters + " { };";
-            var code = KustoCode.ParseAndAnalyze(query);
-            var let = code.Syntax.GetFirstDescendant<LetStatement>();
-
-            if (let.Name.ReferencedSymbol is FunctionSymbol fs)
-            {
-                return fs.Signatures[0].Parameters;
-            }
-            else if (let.Name.ReferencedSymbol is VariableSymbol vs
-                && vs.Type is FunctionSymbol vfs)
-            {
-                return vfs.Signatures[0].Parameters;
-            }
-            else
-            {
-                return NoParameters;
             }
         }
 
