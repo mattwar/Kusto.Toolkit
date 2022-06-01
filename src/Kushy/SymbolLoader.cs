@@ -11,19 +11,21 @@ using Kusto.Language;
 using Kusto.Language.Editor;
 using Kusto.Language.Syntax;
 using Kusto.Language.Symbols;
+using Kusto.Data.Common;
 
 namespace Kushy
 {
     /// <summary>
     /// A class that retrieves schema information from a cluster as <see cref="Symbol"/> instances.
     /// </summary>
-    public class SymbolLoader
+    public class SymbolLoader : IDisposable
     {
         private readonly KustoConnectionStringBuilder _defaultConnection;
         private readonly string _defaultClusterName;
         private readonly string _defaultDomain;
+        private readonly Dictionary<string, ICslAdminProvider> _dataSourceToAdminProviderMap = new Dictionary<string, ICslAdminProvider>();
         private readonly HashSet<string> _ignoreClusterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, HashSet<string>> _badDatabaseNameMap = new Dictionary<string, HashSet<string>>();
+        private readonly Dictionary<string, HashSet<string>> _clusterToBadDbNameMap = new Dictionary<string, HashSet<string>>();
 
         /// <summary>
         /// Creates a new <see cref="SymbolLoader"/> instance. recommended method: SymbolLoader(KustoConnectionStringBuilder clusterConnection)
@@ -54,6 +56,35 @@ namespace Kushy
         }
 
         /// <summary>
+        /// Dispose any open resources.
+        /// </summary>
+        public void Dispose()
+        {
+            // Disposes any open admin providers.
+            var providers = _dataSourceToAdminProviderMap.Values.ToList();
+            _dataSourceToAdminProviderMap.Clear();
+
+            foreach (var provider in providers)
+            {
+                provider.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Gets or Creates an admin provider instance.
+        /// </summary>
+        private ICslAdminProvider GetOrCreateAdminProvider(KustoConnectionStringBuilder connection)
+        {
+            if (!_dataSourceToAdminProviderMap.TryGetValue(connection.DataSource, out var provider))
+            {
+                provider = KustoClientFactory.CreateCslAdminProvider(connection);
+                _dataSourceToAdminProviderMap.Add(connection.DataSource, provider);
+            }
+
+            return provider;
+        }
+
+        /// <summary>
         /// Gets a list of all the database names in the cluster associated with the connection.
         /// </summary>
         public async Task<string[]> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
@@ -63,7 +94,9 @@ namespace Kushy
                 : GetFullHostName(clusterName);
 
             var connection = GetClusterConnection(clusterName);
-            var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(connection, "", ".show databases", throwOnError, cancellationToken);
+            var provider = GetOrCreateAdminProvider(connection);
+
+            var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(provider, "", ".show databases", throwOnError, cancellationToken);
             if (databases == null)
                 return null;
 
@@ -80,27 +113,28 @@ namespace Kushy
                 : GetFullHostName(clusterName);
 
             // if we've already determined this database name is bad, then bail out
-            if (_badDatabaseNameMap.TryGetValue(clusterName, out var badDbNames)
+            if (_clusterToBadDbNameMap.TryGetValue(clusterName, out var badDbNames)
                 && badDbNames.Contains(databaseName))
                 return null;
 
             var connection = GetClusterConnection(clusterName);
+            var provider = GetOrCreateAdminProvider(connection);
 
-            var tables = await LoadTablesAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var tables = await LoadTablesAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
             if (tables == null)
             {
                 if (badDbNames == null)
                 {
                     badDbNames = new HashSet<string>();
-                    _badDatabaseNameMap.Add(clusterName, badDbNames);
+                    _clusterToBadDbNameMap.Add(clusterName, badDbNames);
                 }
                 badDbNames.Add(databaseName);
                 return null;
             }
 
-            var externalTables = await LoadExternalTablesAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            var materializedViews = await LoadMaterializedViewsAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            var functions = await LoadFunctionsAsync(connection, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var externalTables = await LoadExternalTablesAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var materializedViews = await LoadMaterializedViewsAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var functions = await LoadFunctionsAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
 
             var members = new List<Symbol>();
             members.AddRange(tables);
@@ -112,12 +146,12 @@ namespace Kushy
             return databaseSymbol;
         }
 
-        private async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(KustoConnectionStringBuilder connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        private async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
             var tables = new List<TableSymbol>();
 
             // get table schema from .show database xxx schema
-            var databaseSchemas = await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(connection, databaseName, $".show database {databaseName} schema", throwOnError, cancellationToken).ConfigureAwait(false);
+            var databaseSchemas = await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(provider, databaseName, $".show database {databaseName} schema", throwOnError, cancellationToken).ConfigureAwait(false);
             if (databaseSchemas == null)
                 return null;
 
@@ -133,17 +167,17 @@ namespace Kushy
             return tables;
         }
 
-        private async Task<IReadOnlyList<TableSymbol>> LoadExternalTablesAsync(KustoConnectionStringBuilder connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        private async Task<IReadOnlyList<TableSymbol>> LoadExternalTablesAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
             var tables = new List<TableSymbol>();
 
             // get external tables from .show external tables and .show external table xxx cslschema
-            var externalTables = await ExecuteControlCommandAsync<ShowExternalTablesResult>(connection, databaseName, ".show external tables", throwOnError, cancellationToken);
+            var externalTables = await ExecuteControlCommandAsync<ShowExternalTablesResult>(provider, databaseName, ".show external tables", throwOnError, cancellationToken);
             if (externalTables != null)
             {
                 foreach (var et in externalTables)
                 {
-                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(connection, databaseName, $".show external table {et.TableName} cslschema", throwOnError, cancellationToken);
+                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(provider, databaseName, $".show external table {et.TableName} cslschema", throwOnError, cancellationToken);
                     if (etSchemas != null && etSchemas.Length > 0)
                     {
                         var mvSymbol = new ExternalTableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString);
@@ -155,17 +189,17 @@ namespace Kushy
             return tables;
         }
 
-        private async Task<IReadOnlyList<TableSymbol>> LoadMaterializedViewsAsync(KustoConnectionStringBuilder connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        private async Task<IReadOnlyList<TableSymbol>> LoadMaterializedViewsAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
             var tables = new List<TableSymbol>();
 
             // get materialized views from .show materialized-views and .show materialized-view xxx cslschema
-            var materializedViews = await ExecuteControlCommandAsync<ShowMaterializedViewsResult>(connection, databaseName, ".show materialized-views", throwOnError, cancellationToken);
+            var materializedViews = await ExecuteControlCommandAsync<ShowMaterializedViewsResult>(provider, databaseName, ".show materialized-views", throwOnError, cancellationToken);;
             if (materializedViews != null)
             {
                 foreach (var mv in materializedViews)
                 {
-                    var mvSchemas = await ExecuteControlCommandAsync<ShowMaterializedViewSchemaResult>(connection, databaseName, $".show materialized-view {mv.Name} cslschema", throwOnError, cancellationToken);
+                    var mvSchemas = await ExecuteControlCommandAsync<ShowMaterializedViewSchemaResult>(provider, databaseName, $".show materialized-view {mv.Name} cslschema", throwOnError, cancellationToken);
                     if (mvSchemas != null && mvSchemas.Length > 0)
                     {
                         var mvSymbol = new MaterializedViewSymbol(mv.Name, "(" + mvSchemas[0].Schema + ")", mv.Query, mv.DocString);
@@ -177,12 +211,12 @@ namespace Kushy
             return tables;
         }
 
-        private async Task<IReadOnlyList<FunctionSymbol>> LoadFunctionsAsync(KustoConnectionStringBuilder connection, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        private async Task<IReadOnlyList<FunctionSymbol>> LoadFunctionsAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
             var functions = new List<FunctionSymbol>();
 
             // get functions for .show functions
-            var functionSchemas = await ExecuteControlCommandAsync<ShowFunctionsResult>(connection, databaseName, ".show functions", throwOnError, cancellationToken).ConfigureAwait(false);
+            var functionSchemas = await ExecuteControlCommandAsync<ShowFunctionsResult>(provider, databaseName, ".show functions", throwOnError, cancellationToken).ConfigureAwait(false);
             if (functionSchemas == null)
                 return null;
 
@@ -299,7 +333,7 @@ namespace Kushy
                     }
                 }
 
-                // we already have all the known schema for this cluster
+                // we already have all the known schema for this cluster 
                 _ignoreClusterNames.Add(clusterName);
             }
 
@@ -447,18 +481,15 @@ namespace Kushy
         /// <summary>
         /// Executes a query or command against a kusto cluster and returns a sequence of result row instances.
         /// </summary>
-        private static async Task<T[]> ExecuteControlCommandAsync<T>(KustoConnectionStringBuilder connection, string database, string command, bool throwOnError, CancellationToken cancellationToken)
+        private async Task<T[]> ExecuteControlCommandAsync<T>(ICslAdminProvider provider, string database, string command, bool throwOnError, CancellationToken cancellationToken)
         {
             try
             {
-                using (var client = KustoClientFactory.CreateCslAdminProvider(connection))
-                {
-                    var resultReader = await client.ExecuteControlCommandAsync(database, command).ConfigureAwait(false);
-                    var results = KustoDataReaderParser.ParseV1(resultReader, null);
-                    var tableReader = results[WellKnownDataSet.PrimaryResult].Single().TableData.CreateDataReader();
-                    var objectReader = new ObjectReader<T>(tableReader);
-                    return objectReader.ToArray();
-                }
+                var resultReader = await provider.ExecuteControlCommandAsync(database, command).ConfigureAwait(false);
+                var results = KustoDataReaderParser.ParseV1(resultReader, null);
+                var tableReader = results[WellKnownDataSet.PrimaryResult].Single().TableData.CreateDataReader();
+                var objectReader = new ObjectReader<T>(tableReader);
+                return objectReader.ToArray();
             }
             catch (Exception) when (!throwOnError)
             {
@@ -469,11 +500,6 @@ namespace Kushy
         private string GetFullHostName(string clusterNameOrUri)
         {
             return KustoFacts.GetFullHostName(KustoFacts.GetHostName(clusterNameOrUri), _defaultDomain);
-        }
-
-        private string GetClusterHost(string clusterName)
-        {
-            return GetHost(GetClusterConnection(clusterName));
         }
 
         private string GetHost(KustoConnectionStringBuilder connection)
@@ -491,25 +517,26 @@ namespace Kushy
                 return _defaultConnection;
             }
 
-            // borrow most security settings from default cluster connection
-            var builder = new KustoConnectionStringBuilder(_defaultConnection);
-
             if (string.IsNullOrWhiteSpace(clusterUriOrName))
                 return null;
 
             var clusterUri = clusterUriOrName;
 
+            if (!clusterUri.Contains("://"))
+            {
+                clusterUri = _defaultConnection.ConnectionScheme + "://" + clusterUri;
+            }
+
             clusterUri = KustoFacts.GetFullHostName(clusterUri, _defaultDomain);
 
-            if (!clusterUri.Contains("://"))
-                clusterUri = builder.ConnectionScheme + "://" + clusterUri;
+            // borrow most security settings from default cluster connection
+            var connection = new KustoConnectionStringBuilder(_defaultConnection);
+            connection.DataSource = clusterUri;
+            connection.ApplicationCertificateBlob = _defaultConnection.ApplicationCertificateBlob;
+            connection.ApplicationKey = _defaultConnection.ApplicationKey;
+            connection.InitialCatalog = "NetDefaultDB";
 
-            builder.DataSource = clusterUri;
-            builder.ApplicationCertificateBlob = _defaultConnection.ApplicationCertificateBlob;
-            builder.ApplicationKey = _defaultConnection.ApplicationKey;
-            builder.InitialCatalog = "NetDefaultDB";
-
-            return builder;
+            return connection;
         }
 
         public class ShowDatabasesResult
