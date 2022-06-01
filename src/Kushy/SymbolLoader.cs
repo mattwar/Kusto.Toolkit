@@ -146,7 +146,7 @@ namespace Kushy
                     var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(connection, databaseName, $".show external table {et.TableName} cslschema", throwOnError, cancellationToken);
                     if (etSchemas != null && etSchemas.Length > 0)
                     {
-                        var mvSymbol = new TableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString).WithIsExternal(true);
+                        var mvSymbol = new ExternalTableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString);
                         tables.Add(mvSymbol);
                     }
                 }
@@ -168,7 +168,7 @@ namespace Kushy
                     var mvSchemas = await ExecuteControlCommandAsync<ShowMaterializedViewSchemaResult>(connection, databaseName, $".show materialized-view {mv.Name} cslschema", throwOnError, cancellationToken);
                     if (mvSchemas != null && mvSchemas.Length > 0)
                     {
-                        var mvSymbol = new TableSymbol(mv.Name, "(" + mvSchemas[0].Schema + ")", mv.DocString).WithIsMaterializedView(true);
+                        var mvSymbol = new MaterializedViewSymbol(mv.Name, "(" + mvSchemas[0].Schema + ")", mv.Query, mv.DocString);
                         tables.Add(mvSymbol);
                     }
                 }
@@ -555,6 +555,7 @@ namespace Kushy
         {
             public string Name;
             public string DocString;
+            public string Query;
         }
 
         public class ShowMaterializedViewSchemaResult
