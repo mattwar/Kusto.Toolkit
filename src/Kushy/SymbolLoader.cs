@@ -88,7 +88,7 @@ namespace Kushy
     }
 
     /// <summary>
-    /// A class that retrieves schema symbols from a cluster server.
+    /// A <see cref="SymbolLoader"/> that retrieves schema symbols from a Kusto server.
     /// </summary>
     public class ServerSymbolLoader : SymbolLoader
     {
@@ -956,6 +956,9 @@ namespace Kushy
         }
     }
 
+    /// <summary>
+    /// Helpful utility methods for operating with symbols.
+    /// </summary>
     public static class SymbolFacts
     {
         public static string GetFullHostName(string clusterNameOrUri, string defaultDomain)
