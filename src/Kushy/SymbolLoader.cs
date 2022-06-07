@@ -132,6 +132,11 @@ namespace Kushy
         public override string DefaultCluster => _defaultClusterName;
 
         /// <summary>
+        /// The default database specified in the connection
+        /// </summary>
+        public string DefaultDatabase => _defaultConnection.InitialCatalog;
+
+        /// <summary>
         /// Dispose any open resources.
         /// </summary>
         public override void Dispose()
