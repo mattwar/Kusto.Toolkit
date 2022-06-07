@@ -1,0 +1,9 @@
+{
+  "Name": "KustoMonitoringPersistentDatabase",
+  "Tables": [
+    {
+      "Name": "KustoMonitoringTable",
+      "Schema": "(KustoMonitoringColumn: string)"
+    }
+  ]
+}

@@ -1,0 +1,292 @@
+{
+  "Name": "Samples",
+  "Tables": [
+    {
+      "Name": "StormEvents",
+      "Schema": "(StartTime: datetime, EndTime: datetime, EpisodeId: int, EventId: int, State: string, EventType: string, InjuriesDirect: int, InjuriesIndirect: int, DeathsDirect: int, DeathsIndirect: int, DamageProperty: int, DamageCrops: int, Source: string, BeginLocation: string, EndLocation: string, BeginLat: real, BeginLon: real, EndLat: real, EndLon: real, EpisodeNarrative: string, EventNarrative: string, StormSummary: dynamic)",
+      "Description": "US storm events. Data source: https://www.ncdc.noaa.gov/stormevents"
+    },
+    {
+      "Name": "demo_make_series1",
+      "Schema": "(TimeStamp: datetime, BrowserVer: string, OsVer: string, Country: string)"
+    },
+    {
+      "Name": "demo_series2",
+      "Schema": "(['id']: string, x: dynamic, y: dynamic)"
+    },
+    {
+      "Name": "demo_series3",
+      "Schema": "(['id']: string, t: dynamic, num: dynamic)"
+    },
+    {
+      "Name": "demo_many_series1",
+      "Schema": "(TIMESTAMP: datetime, Loc: string, Op: string, DB: string, DataRead: long)"
+    },
+    {
+      "Name": "ConferenceSessions",
+      "Schema": "(conference: string, sessionid: string, session_title: string, session_type: string, owner: string, participants: string, URL: string, level: int, session_location: string, starttime: datetime, duration: int, time_and_duration: string, kusto_affinity: string)"
+    },
+    {
+      "Name": "demo_make_series2",
+      "Schema": "(sid: string, TimeStamp: datetime, num: real)"
+    },
+    {
+      "Name": "demo_clustering1",
+      "Schema": "(PreciseTimeStamp: datetime, Region: string, ScaleUnit: string, DeploymentId: string, Tracepoint: long, ServiceHost: string)"
+    },
+    {
+      "Name": "Covid19_Bing",
+      "Schema": "(Location: dynamic, Confirmed: dynamic, Active: dynamic, Deaths: dynamic, Recovered: dynamic, ReportDate: datetime, Id: string, LastUpdated: string, LastRefreshed: string, Sources: string, AreaInfo: dynamic, Location_1: string, ReportDate_1: string, LastUpdated_1: datetime, LastRefreshed_1: datetime, Sources_1: dynamic)",
+      "Description": "Data source: https://bing.com/covid19"
+    },
+    {
+      "Name": "Covid19_map2",
+      "Schema": "(AreaInfo: dynamic, Location: string, Confirmed: dynamic, Active: dynamic, Deaths: dynamic, Recovered: dynamic, ReportDate: string, Id: string, LastUpdated: datetime, LastRefreshed: datetime, Sources: dynamic)"
+    },
+    {
+      "Name": "US_States",
+      "Schema": "(features: dynamic)",
+      "Description": "US States. Data source: https://www.census.gov/geographies/mapping-files/time-series/geo/cartographic-boundary.html"
+    },
+    {
+      "Name": "US_Counties",
+      "Schema": "(features: dynamic)",
+      "Description": "US Counties. Data source: https://www.census.gov/geographies/mapping-files/time-series/geo/cartographic-boundary.html"
+    },
+    {
+      "Name": "Covid19",
+      "Schema": "(Timestamp: datetime, Country: string, State: string, CountryCode: string, StateCode: string, Latitute: real, Longtitude: real, Confirmed: long, Deaths: long, Recovered: long, Active: long)"
+    },
+    {
+      "Name": "irregular_ts",
+      "Schema": "(OsVer: string, TimeStamp: dynamic, num: dynamic)"
+    },
+    {
+      "Name": "demo_prometheus",
+      "Schema": "(TimeStamp: datetime, Name: string, Labels: dynamic, Val: real)"
+    },
+    {
+      "Name": "PopulationData",
+      "Schema": "(State: string, Population: long)"
+    },
+    {
+      "Name": "OccupancyDetection",
+      "Schema": "(Timestamp: datetime, Temperature: real, Humidity: real, Light: real, CO2: real, HumidityRatio: real, Occupancy: int, Test: int)"
+    },
+    {
+      "Name": "SamplePowerRequirementHistorizedData",
+      "Schema": "(timestamp: datetime, twinId: string, modelId: string, name: string, value: real, relationshipTarget: dynamic, relationshipId: dynamic)",
+      "Description": "Contains historized property values over a one month period"
+    }
+  ],
+  "ExternalTables": [
+    {
+      "Name": "TaxiRides",
+      "Schema": "(trip_id: long, vendor_id: string, pickup_datetime: datetime, dropoff_datetime: datetime, store_and_fwd_flag: string, rate_code_id: int, pickup_longitude: real, pickup_latitude: real, dropoff_longitude: real, dropoff_latitude: real, passenger_count: int, trip_distance: real, fare_amount: real, extra: real, mta_tax: real, tip_amount: real, tolls_amount: real, ehail_fee: real, improvement_surcharge: real, total_amount: real, payment_type: string, trip_type: int, pickup: string, dropoff: string, cab_type: string, precipitation: int, snow_depth: int, snowfall: int, max_temperature: int, min_temperature: int, average_wind_speed: int, pickup_nyct2010_gid: int, pickup_ctlabel: string, pickup_borocode: int, pickup_boroname: string, pickup_ct2010: string, pickup_boroct2010: string, pickup_cdeligibil: string, pickup_ntacode: string, pickup_ntaname: string, pickup_puma: string, dropoff_nyct2010_gid: int, dropoff_ctlabel: string, dropoff_borocode: int, dropoff_boroname: string, dropoff_ct2010: string, dropoff_boroct2010: string, dropoff_cdeligibil: string, dropoff_ntacode: string, dropoff_ntaname: string, dropoff_puma: string)",
+      "Description": "Blob"
+    }
+  ],
+  "MaterializedViews": [
+    {
+      "Name": "DailyCovid19",
+      "Schema": "(Timestamp: datetime, Country: string, State: string, CountryCode: string, StateCode: string, max_Confirmed: long, max_Deaths: long, max_Recovered: long, max_Active: long)",
+      "Description": "Covid19",
+      "Query": "Covid19\r\n    | summarize max(Confirmed), max(Deaths), max(Recovered), max(Active) by bin(Timestamp, 1d), Country, State, CountryCode, StateCode"
+    }
+  ],
+  "Functions": [
+    {
+      "Name": "MyFunction1",
+      "Parameters": "()",
+      "Body": "{     StormEvents     | limit 100 }  ",
+      "Description": "Simple demo function"
+    },
+    {
+      "Name": "MyFunction2",
+      "Parameters": "(myLimit: long)",
+      "Body": "{     StormEvents     | limit myLimit }  ",
+      "Description": "Demo function with parameter"
+    },
+    {
+      "Name": "MyFunction3",
+      "Parameters": "()",
+      "Body": "{     MyFunction(100) }  ",
+      "Description": "Function calling other function"
+    },
+    {
+      "Name": "MyFunction4",
+      "Parameters": "()",
+      "Body": "{\r\n    let limitVar = 100;\r\n    let result = MyFunction(limitVar);\r\n    result\r\n} ",
+      "Description": "Function calling other function"
+    },
+    {
+      "Name": "MyFunction",
+      "Parameters": "(someLimit: long)",
+      "Body": "{\r\n    StormEvents\r\n    | limit someLimit\r\n} ",
+      "Description": "Simple demo function"
+    },
+    {
+      "Name": "InterestingStates",
+      "Parameters": "()",
+      "Body": "{\r\n    dynamic([\"WASHINGTON\", \"FLORIDA\", \"GEORGIA\", \"NEW YORK\"])\r\n}",
+      "Description": "A list of interesting states"
+    },
+    {
+      "Name": "Trim",
+      "Parameters": "(text: string)",
+      "Body": "{extract(@\"\\s*(.*)\",1,text)}",
+      "Description": "Remove Spaces"
+    },
+    {
+      "Name": "MyCalc",
+      "Parameters": "(a: real, b: real, c: real)",
+      "Body": "{a+b+c}"
+    },
+    {
+      "Name": "MyFunction5",
+      "Parameters": "(myLimit: long)",
+      "Body": "{StormEvents | limit myLimit}\n",
+      "Description": "Demo function with parameter"
+    },
+    {
+      "Name": "Add",
+      "Parameters": "(a: real, b: real)",
+      "Body": "{a+b}"
+    },
+    {
+      "Name": "MyFunctionDate",
+      "Parameters": "(timestamp: datetime)",
+      "Body": "{\r\n    StormEvents\r\n    | where EndTime <= timestamp\r\n}",
+      "Description": "Demo function with date"
+    },
+    {
+      "Name": "MyFunction6",
+      "Parameters": "(myLimit: long)",
+      "Body": "{StromEvents | limit myLimit}",
+      "Description": "demo function with parameter"
+    },
+    {
+      "Name": "StormsReportedBySource",
+      "Parameters": "(source: string)",
+      "Body": "{\r\n    StormEvents\r\n    | where Source == source\r\n}"
+    },
+    {
+      "Name": "TableAccess",
+      "Parameters": "(tableName: string)",
+      "Body": "{\r\n    table(tableName) | count\r\n}",
+      "Description": "Table access example"
+    },
+    {
+      "Name": "DirectTableAccess",
+      "Parameters": "(myTable: (*))",
+      "Body": "{\r\n    myTable | count\r\n}",
+      "Description": "Direct table access example"
+    },
+    {
+      "Name": "get_modules_version_sf",
+      "Parameters": "(modules: (*))",
+      "Body": "{\r\n    let code =\r\n    'import importlib\\n'\r\n    'import sys\\n'\r\n    '\\n'\r\n    'result = df\\n'\r\n    'for i in range(df.shape[0]):\\n'\r\n    '    try:\\n'\r\n    '        m = importlib.import_module(df.iloc[i, 0])\\n'\r\n    '        result.loc[i, \"ver\"] = m.__version__ if hasattr(m, \"__version__\") else \"missing __version__ attribute\"\\n'\r\n    '    except Exception as ex:\\n'\r\n    '        result.loc[i, \"ver\"] = \"ERROR: \" + (ex.msg if hasattr(ex, \"msg\") else \"exception, no msg\")\\n'\r\n    'id = df.shape[0]\\n'\r\n    'result.loc[id, df.columns[0]] = \"Python\"\\n'\r\n    'result.loc[id, \"ver\"] = sys.version\\n';\r\n    modules | evaluate python(code, 'df(*),ver:string')\r\n}",
+      "Description": "Returns version information for the Python engine and the specified packages"
+    },
+    {
+      "Name": "StormsReportedByStateAndSource",
+      "Parameters": "(state: string, source: string)",
+      "Body": "{\r\n    StormEvents\r\n    | where State == state\r\n    | where Source == source\r\n}"
+    },
+    {
+      "Name": "StormEventsStates",
+      "Parameters": "()",
+      "Body": "{\r\n    StormEvents\r\n    | summarize by State\r\n}"
+    },
+    {
+      "Name": "PQ_ComplexTableParam",
+      "Parameters": "(d: (a: string, b: int, ['c\"']: timespan), q: (*), j: dynamic, e: bool, f: string, g: int, h: long, i: real, k: real, l: timespan, m: decimal, n: datetime, o: datetime, p: decimal, r: guid, s: string)",
+      "Body": "{\r\n    d\r\n}",
+      "Description": "Test Doc"
+    },
+    {
+      "Name": "JoinCorona",
+      "Parameters": "()",
+      "Body": "{\r\nCoronaConfirmed\r\n| extend Confirmed= Count\r\n| join kind=fullouter \r\n(CoronaDeaths | extend Deaths = Count) on ProvinceOrState, CountryOrRegion, Timestamp\r\n| join kind=fullouter \r\n(CoronaRecovered | extend Recovered = Count) on ProvinceOrState, CountryOrRegion, Timestamp\r\n| project Timestamp, CountryOrRegion, ProvinceOrState, Confirmed, Deaths, Recovered, Lat, Long\r\n| where Confirmed >0 or Deaths > 0 or Recovered > 0\r\n}"
+    },
+    {
+      "Name": "UpdateCovidCountries",
+      "Parameters": "()",
+      "Body": "{\nlet lastRefreshed = toscalar(CovidCountries | summarize max(LastRefreshed)); \nlet newRefreshed = toscalar(externaldata(d:string)[\"https://binganswer.blob.core.windows.net/cssegisanddata/Covid19.Country.json\"]\r\nwith(format=txt)\r\n| mv-expand todynamic(d)\n| evaluate bag_unpack(d)\n| summarize max(LastRefreshed));\nlet RequiresUpdate = lastRefreshed < newRefreshed; \nexternaldata(d:string)[\"https://binganswer.blob.core.windows.net/cssegisanddata/Covid19.Country.json\"]\r\nwith(format=txt)\r\n| mv-expand todynamic(d)\r\n| evaluate bag_unpack(d)\r\n| project ReportDate, LastUpdated, LastRefreshed, Country, Province, Latitude, Longitude, Confirmed, ConfirmedChange, Recovered, RecoveredChange, Deaths, DeathsChange, Active\n| join kind=leftanti\n(\n    CovidCountries |summarize arg_max(LastRefreshed, *) by Country, Province\n) on Country, Province, Confirmed, Recovered, Deaths\n| where RequiresUpdate \n}"
+    },
+    {
+      "Name": "Covid19_flat",
+      "Parameters": "()",
+      "Body": "{    \r\n    let Historic =\r\n    Covid19_Bing\r\n    | extend Id = iff(Id == \"/\" and isnotempty(Location.CountryName) and Location.CountryName != \"Worldwide\", strcat('/', Location.CountryName), Id)\r\n    | project \r\n        ReportDate,\r\n        Country = tostring(Location.CountryName),\r\n        Longitude = toreal(Location.Longitude),\r\n        Latitude = toreal(Location.Latitude),\r\n        Confirmed = tolong(Confirmed.Value), ConfirmedChange = tolong(Confirmed.Change), \r\n        Active = tolong(Active.Value), ActiveChange = tolong(Active.Change), \r\n        Deaths = tolong(Deaths.Value), DeathsChange = tolong(Deaths.Change),\r\n        Id,  \r\n        Location;\r\n     let IdMap = Historic | where ReportDate > ago(5d) | extend State = Location.StateCode | extend StateOrCountry= iff(isempty(State), Country, State) |  summarize by StateOrCountry, Id;         \r\n     let Recent = Covid19_map2 \r\n        | project \r\n                ReportDate = LastUpdated,\r\n                Country = tostring(AreaInfo.CountryName),\r\n                Longitude = todouble(AreaInfo.Longitude),\r\n                Latitude = todouble(AreaInfo.Latitude),\r\n                Confirmed = tolong(Confirmed.Value), ConfirmedChange = tolong(Confirmed.Change),\r\n                Active = tolong(Active.Value), ActiveChange = tolong(Active.Change),\r\n                Deaths = tolong(Deaths.Value), DeathsChange = tolong(Deaths.Change),\r\n                Recovered = tolong(Recovered.Value), RecoveredChange = tolong(Recovered.Change),\r\n                State = tostring(AreaInfo.StateName)\r\n        | extend Active = iff(isempty(Active) and Confirmed >0 , Confirmed - Deaths - iff(isempty(Recovered), 0, Recovered), Active)\r\n        | extend StateOrCountry = iff(isempty(State), Country, State)\r\n        | join (IdMap) on StateOrCountry | project-away StateOrCountry, StateOrCountry1, State\r\n        | summarize arg_max(ReportDate, *) by Id;\r\n        Historic | union Recent\r\n}"
+    },
+    {
+      "Name": "temp",
+      "Parameters": "()",
+      "Body": "{    \r\n    let Historic =\r\n    Covid19_Bing\r\n    | extend Id = iff(Id == \"/\" and isnotempty(Location.CountryName) and Location.CountryName != \"Worldwide\", strcat('/', Location.CountryName), Id)\r\n    | project \r\n        ReportDate,\r\n        Country = tostring(Location.CountryName),\r\n        Longitude = toreal(Location.Longitude),\r\n        Latitude = toreal(Location.Latitude),\r\n        Confirmed = tolong(Confirmed.Value), ConfirmedChange = tolong(Confirmed.Change), \r\n        Active = tolong(Active.Value), ActiveChange = tolong(Active.Change), \r\n        Deaths = tolong(Deaths.Value), DeathsChange = tolong(Deaths.Change),\r\n        Id,  \r\n        Location;\r\n     let IdMap = Historic | where ReportDate > ago(5d) | extend State = Location.StateCode | extend StateOrCountry= iff(isempty(State), Country, State) |  summarize by StateOrCountry, Id;         \r\n     let Recent = Covid19_map2 \r\n        | project \r\n                ReportDate = LastUpdated,\r\n                Country = tostring(AreaInfo.CountryName),\r\n                Longitude = todouble(AreaInfo.Longitude),\r\n                Latitude = todouble(AreaInfo.Latitude),\r\n                Confirmed = tolong(Confirmed.Value), ConfirmedChange = tolong(Confirmed.Change),\r\n                Active = tolong(Confirmed.Value), ActiveChange = tolong(Confirmed.Change),\r\n                Deaths = tolong(Deaths.Value), DeathsChange = tolong(Deaths.Change),\r\n                State = tostring(AreaInfo.StateName)\r\n        | extend StateOrCountry = iff(isempty(State), Country, State)\r\n        | join (IdMap) on StateOrCountry | project-away StateOrCountry, StateOrCountry1, State;\r\n        Historic | union Recent\r\n}"
+    },
+    {
+      "Name": "series_moving_avg_fl",
+      "Parameters": "(y_series: dynamic, n: int, center: bool)",
+      "Body": "{\r\n    series_fir(y_series, repeat(1, n), true, center)\r\n}",
+      "Description": "Calculate moving average of specified width"
+    },
+    {
+      "Name": "series_dot_product_fl",
+      "Parameters": "(vec1: dynamic, vec2: dynamic)",
+      "Body": "{\r\n    let elem_prod = series_multiply(vec1, vec2);\r\n    let cum_sum = series_iir(elem_prod, dynamic([1]), dynamic([1,-1]));\r\n    todouble(cum_sum[-1])\r\n}",
+      "Description": "Calculate the dot product of 2 numerical arrays"
+    },
+    {
+      "Name": "series_exp_smoothing_fl",
+      "Parameters": "(y_series: dynamic, alpha: real)",
+      "Body": "{\r\n    series_iir(y_series, pack_array(alpha), pack_array(1, alpha-1))\r\n}",
+      "Description": "Basic exponential smoothing for a series"
+    },
+    {
+      "Name": "series_downsample_fl",
+      "Parameters": "(tbl: (*), t_col: string, y_col: string, ds_t_col: string, ds_y_col: string, sampling_factor: int)",
+      "Body": "{\r\n    tbl\r\n    | extend _t_ = column_ifexists(t_col, dynamic(0)), _y_ = column_ifexists(y_col, dynamic(0))\r\n    | extend _y_ = series_fir(_y_, repeat(1, sampling_factor), true, true)    //  apply a simple low pass filter before sub-sampling\r\n    | mv-apply _t_ to typeof(DateTime), _y_ to typeof(double) on\r\n    (extend rid=row_number()-1\r\n    | where rid % sampling_factor == ceiling(sampling_factor/2.0)-1                    //  sub-sampling\r\n    | summarize _t_ = make_list(_t_), _y_ = make_list(_y_))\r\n    | extend cols = pack(ds_t_col, _t_, ds_y_col, _y_)\r\n    | project-away _t_, _y_\r\n    | evaluate bag_unpack(cols)\r\n}",
+      "Description": "Downsampling a series by an integer factor"
+    },
+    {
+      "Name": "series_metric_fl",
+      "Parameters": "(metrics_tbl: (*), timestamp_col: string, name_col: string, labels_col: string, value_col: string, metric_name: string, labels_selector: string, lookback: timespan, offset: timespan)",
+      "Body": "{\r\n    let selector_d=iff(labels_selector == '', dynamic(['']), split(labels_selector, ','));\r\n    let etime = ago(offset);\r\n    let stime = etime - lookback;\r\n    metrics_tbl\r\n    | extend timestamp = column_ifexists(timestamp_col, datetime(null)), name = column_ifexists(name_col, ''), labels = column_ifexists(labels_col, dynamic(null)), value = column_ifexists(value_col, 0)\r\n    | extend labels = dynamic_to_json(labels)       //  convert to string and sort by key\r\n    | where name == metric_name and timestamp between(stime..etime)\r\n    | order by timestamp asc\r\n    | summarize timestamp = make_list(timestamp), value=make_list(value) by name, labels\r\n    | where labels has_all (selector_d)\r\n}",
+      "Description": "Selecting & retrieving metrics like PromQL"
+    },
+    {
+      "Name": "series_rate_fl",
+      "Parameters": "(tbl: (timestamp: dynamic, value: dynamic), n_bins: int, fix_reset: bool)",
+      "Body": "{\r\n    tbl\r\n    | where fix_reset                                                   //  Prometheus counters can only go up\r\n    | mv-apply value to typeof(double) on   \r\n    ( extend correction = iff(value < prev(value), prev(value), 0.0)    // if the value decreases we assume it was reset to 0, so add last value\r\n    | extend cum_correction = row_cumsum(correction)\r\n    | extend corrected_value = value + cum_correction\r\n    | summarize value = make_list(corrected_value))\r\n    | union (tbl | where not(fix_reset))\r\n    | extend timestampS = array_shift_right(timestamp, n_bins), valueS = array_shift_right(value, n_bins)\r\n    | extend dt = series_subtract(timestamp, timestampS)\r\n    | extend dt = series_divide(dt, 1e7)                              //  converts from ticks to seconds\r\n    | extend dv = series_subtract(value, valueS)\r\n    | extend rate = series_divide(dv, dt)\r\n    | project-away dt, dv, timestampS, value, valueS\r\n}",
+      "Description": "Simulate PromQL rate()"
+    },
+    {
+      "Name": "GetStatesWithPopulationSmallerThan",
+      "Parameters": "(amount: long)",
+      "Body": "{ \r\n    PopulationData\r\n    | where Population < amount\r\n    | project State;\r\n}"
+    },
+    {
+      "Name": "factorial_fl",
+      "Parameters": "(n: int)",
+      "Body": "{\r\n    tolong(gamma(n+1))\r\n}",
+      "Description": "Calculate factorial"
+    },
+    {
+      "Name": "perm_fl",
+      "Parameters": "(n: int, k: int)",
+      "Body": "{\r\n    let fact_n = gamma(n+1);\r\n    let fact_nk = gamma(n-k+1);\r\n    tolong(fact_n/fact_nk)\r\n}",
+      "Description": "Calculate number of combinations of selecting k items from total n items with order"
+    },
+    {
+      "Name": "comb_fl",
+      "Parameters": "(n: int, k: int)",
+      "Body": "{\r\n    let fact_n = gamma(n+1);\r\n    let fact_nk = gamma(n-k+1);\r\n    let fact_k = gamma(k+1);\r\n    tolong(fact_n/fact_nk/fact_k)\r\n}",
+      "Description": "Calculate number of combinations for selection of k items out of n items without order"
+    },
+    {
+      "Name": "EventsByStates",
+      "Parameters": "(EventTypeParam: dynamic)",
+      "Body": "{  \r\n    StormEvents\r\n   | where (\"__SelectAll__\" in(EventTypeParam)) or (EventType in (EventTypeParam))\r\n   | summarize Events=count() by EventType,State\r\n}"
+    }
+  ]
+}
