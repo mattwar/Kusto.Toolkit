@@ -216,12 +216,14 @@ namespace Kushy
             var externalTables = await LoadExternalTablesAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
             var materializedViews = await LoadMaterializedViewsAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
             var functions = await LoadFunctionsAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var entityGroups = await LoadEntityGroupsAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
 
             var members = new List<Symbol>();
             members.AddRange(tables);
             members.AddRange(externalTables);
             members.AddRange(materializedViews);
             members.AddRange(functions);
+            members.AddRange(entityGroups);
 
             var databaseSymbol = new DatabaseSymbol(databaseName, members);
             return databaseSymbol;
@@ -308,6 +310,18 @@ namespace Kushy
             }
 
             return functions;
+        }
+
+        private async Task<IReadOnlyList<EntityGroupSymbol>> LoadEntityGroupsAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        {
+            var entityGroupSymbols = new List<EntityGroupSymbol>();
+
+            // get entity groups via .show entity_groups
+            var entityGroups = await ExecuteControlCommandAsync<ShowEntityGroupsResult>(provider, databaseName, ".show entity_groups", throwOnError, cancellationToken).ConfigureAwait(false);
+            if (entityGroups == null)
+                return null;
+
+            return entityGroups.Select(eg => new EntityGroupSymbol(eg.Name, eg.Entities)).ToList();
         }
 
         /// <summary>
@@ -421,6 +435,12 @@ namespace Kushy
             public string Body;
             public string Folder;
             public string DocString;
+        }
+
+        public class ShowEntityGroupsResult
+        {
+            public string Name;
+            public string Entities;
         }
     }
 
@@ -663,6 +683,8 @@ namespace Kushy
                 members.AddRange(db.MaterializedViews.Select(v => CreateMaterializedViewSymbol(v)));
             if (db.Functions != null)
                 members.AddRange(db.Functions.Select(f => CreateFunctionSymbol(f)));
+            if (db.EntityGroups != null)
+                members.AddRange(db.EntityGroups.Select(eg => CreateEntityGroupSymbol(eg)));
 
             return new DatabaseSymbol(db.Name, members);
         }
@@ -687,6 +709,11 @@ namespace Kushy
             return new FunctionSymbol(fun.Name, fun.Parameters, fun.Body, fun.Description);
         }
 
+        public static EntityGroupSymbol CreateEntityGroupSymbol(EntityGroupInfo eg)
+        {
+            return new EntityGroupSymbol(eg.Name, eg.Definition);
+        }
+
         private static DatabaseInfo CreateDatabaseInfo(DatabaseSymbol db)
         {
             return new DatabaseInfo
@@ -695,7 +722,8 @@ namespace Kushy
                 Tables = db.Tables.Count > 0 ? db.Tables.Select(t => CreateTableInfo(t)).ToList() : null,
                 ExternalTables = db.ExternalTables.Count > 0 ? db.ExternalTables.Select(e => CreateExternalTableInfo(e)).ToList() : null,
                 MaterializedViews = db.MaterializedViews.Count > 0 ? db.MaterializedViews.Select(m => CreateMaterializedViewInfo(m)).ToList() : null,
-                Functions = db.Functions.Count > 0 ? db.Functions.Select(f => CreateFunctionInfo(f)).ToList() : null
+                Functions = db.Functions.Count > 0 ? db.Functions.Select(f => CreateFunctionInfo(f)).ToList() : null,
+                EntityGroups = db.EntityGroups.Count > 0 ? db.EntityGroups.Select(eg => CreateEntityGroupInfo(eg)).ToList() : null
             };
         }
 
@@ -741,6 +769,15 @@ namespace Kushy
             };
         }
 
+        private static EntityGroupInfo CreateEntityGroupInfo(EntityGroupSymbol symbol)
+        {
+            return new EntityGroupInfo
+            {
+                Name = symbol.Name,
+                Definition = symbol.Definition
+            };
+        }
+
         public class DatabaseInfo
         {
             public string Name;
@@ -748,6 +785,7 @@ namespace Kushy
             public List<ExternalTableInfo> ExternalTables;
             public List<MaterializedViewInfo> MaterializedViews;
             public List<FunctionInfo> Functions;
+            public List<EntityGroupInfo> EntityGroups;
         }
 
         public class TableInfo
@@ -778,6 +816,12 @@ namespace Kushy
             public string Parameters;
             public string Body;
             public string Description;
+        }
+
+        public class EntityGroupInfo
+        {
+            public string Name;
+            public string Definition;
         }
     }
 
