@@ -916,9 +916,26 @@ namespace Kushy
         /// </summary>
         public async Task<KustoCode> AddReferencedDatabasesAsync(KustoCode code, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
-            var service = new KustoCodeService(code);
-            var globals = await AddReferencedDatabasesAsync(code.Globals, service, throwOnError, cancellationToken).ConfigureAwait(false);
-            return code.WithGlobals(globals);
+            // this only works if analysis is performed
+            if (!code.HasSemantics)
+            {
+                code = code.Analyze();
+            }
+
+            // keep looping until no more databases are added to globals
+            while (true)
+            {
+                var prevGlobals = code.Globals;
+
+                var service = new KustoCodeService(code);
+                var globals = await AddReferencedDatabasesAsync(code.Globals, service, throwOnError, cancellationToken).ConfigureAwait(false);
+                
+                if (globals == prevGlobals)
+                    return code;
+
+                code = code.WithGlobals(globals);
+                code = code.Analyze(cancellationToken: cancellationToken);
+            }
         }
 
         /// <summary>
@@ -926,14 +943,23 @@ namespace Kushy
         /// </summary>
         public async Task<CodeScript> AddReferencedDatabasesAsync(CodeScript script, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
-            var globals = script.Globals;
-
-            foreach (var block in script.Blocks)
+            // keep looping until no more databases are added to globals
+            while (true)
             {
-                globals = await AddReferencedDatabasesAsync(globals, block.Service, throwOnError, cancellationToken).ConfigureAwait(false);
-            }
+                var prevGlobals = script.Globals;
 
-            return script.WithGlobals(globals);
+                var currentGlobals = script.Globals;
+                foreach (var block in script.Blocks)
+                {
+                    currentGlobals = await AddReferencedDatabasesAsync(currentGlobals, block.Service, throwOnError, cancellationToken).ConfigureAwait(false);
+                }
+
+                // if nothing was added we are done
+                if (currentGlobals == prevGlobals)
+                    return script;
+
+                script = script.WithGlobals(currentGlobals);
+            }
         }
 
         /// <summary>
@@ -984,8 +1010,7 @@ namespace Kushy
 
                 if (cluster != null)
                 {
-                    // look for existing database of this name
-                    var db = cluster.Databases.FirstOrDefault(m => m.Name.Equals(dbRef.Database, StringComparison.OrdinalIgnoreCase));
+                    var db = cluster.GetDatabase(dbRef.Database);
 
                     // is this one of those not-yet-populated databases?
                     if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))

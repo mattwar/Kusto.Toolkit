@@ -18,7 +18,6 @@ namespace KushyTests
         private static readonly string TestSchemaPath = "Schema";
         private static readonly string HelpCluster = "help.kusto.windows.net";
 
-
         // Use this test to update database schema files in test source directory when the server schema or serialization changes
 #if false
         [TestMethod]
@@ -136,100 +135,6 @@ namespace KushyTests
                 // default Cluster and Database now refer to newly loaded cluster and database.
                 Assert.AreSame(cluster, newGlobals.Cluster);
                 Assert.AreSame(db, newGlobals.Database);
-            }
-        }
-
-        [TestMethod]
-        public async Task TestSymbolResolver_AddReferencedDatabasesAsync_KustoCode()
-        {
-            using (var loader = new FileSymbolLoader(TestSchemaPath, HelpCluster))
-            {
-                var resolver = new SymbolResolver(loader);
-
-                // set default database to database other than Samples.
-                var globals = await loader.AddOrUpdateDefaultDatabaseAsync(GlobalState.Default, "KustoMonitoringPersistentDatabase");
-
-                // just one database should exist
-                Assert.AreEqual(1, globals.Cluster.Databases.Count);
-
-                // parse query that has explicit reference to Samples database.
-                var code = KustoCode.ParseAndAnalyze("database('Samples').StormEvents", globals);
-
-                // use loader to add symbols for any explicity referenced databases
-                var newCode = await resolver.AddReferencedDatabasesAsync(code);
-
-                // both databases should exist now
-                Assert.AreEqual(2, newCode.Globals.Cluster.Databases.Count);
-
-                // find StormEvents table in Samples database
-                var samples = newCode.Globals.Cluster.Databases.First(db => db.Name == "Samples");
-                var storm = samples.Members.First(m => m.Name == "StormEvents");
-
-                // verify that query expression returns StormEvents table
-                var qb = (QueryBlock)newCode.Syntax;
-                var expr = (qb.Statements[qb.Statements.Count - 1].Element as ExpressionStatement).Expression;
-                Assert.AreSame(storm, expr.ResultType);
-            }
-        }
-
-        [TestMethod]
-        public async Task TestSymbolResolver_AddReferencedDatabasesAsync_CodeScript()
-        {
-            using (var loader = new FileSymbolLoader(TestSchemaPath, HelpCluster))
-            {
-                var resolver = new SymbolResolver(loader);
-
-                // set default database to database other than Samples.
-                var globals = await loader.AddOrUpdateDefaultDatabaseAsync(GlobalState.Default, "KustoMonitoringPersistentDatabase");
-
-                // just one database should exist
-                Assert.AreEqual(1, globals.Cluster.Databases.Count);
-
-                // create script from query and globals
-                var script = CodeScript.From("database('Samples').StormEvents", globals);
-
-                // use loader to add symbols for any explicity referenced databases
-                var newScript = await resolver.AddReferencedDatabasesAsync(script);
-
-                // both databases should exist now
-                Assert.AreEqual(2, newScript.Globals.Cluster.Databases.Count);
-
-                // find StormEvents table in Samples database
-                var samples = newScript.Globals.Cluster.Databases.First(db => db.Name == "Samples");
-                var storm = samples.GetTable("StormEvents");
-            }
-        }
-
-        [TestMethod]
-        public async Task TestSymbolResolver_AddReferencedDatabasesAsync_ClusterShortName()
-        {
-            using (var loader = new FileSymbolLoader(TestSchemaPath, HelpCluster))
-            {
-                var resolver = new SymbolResolver(loader);
-
-                // set default database to database other than Samples.
-                var globals = await loader.AddOrUpdateDefaultDatabaseAsync(GlobalState.Default, "KustoMonitoringPersistentDatabase");
-
-                // just one database should exist
-                Assert.AreEqual(1, globals.Cluster.Databases.Count);
-
-                // parse query that has explicit reference to Samples database.
-                var code = KustoCode.ParseAndAnalyze("cluster('Help').database('Samples').StormEvents", globals);
-
-                // use loader to add symbols for any explicity referenced databases
-                var newCode = await resolver.AddReferencedDatabasesAsync(code);
-
-                // both databases should exist now
-                Assert.AreEqual(2, newCode.Globals.Cluster.Databases.Count);
-
-                // find StormEvents table in Samples database
-                var samples = newCode.Globals.Cluster.Databases.First(db => db.Name == "Samples");
-                var storm = samples.Members.First(m => m.Name == "StormEvents");
-
-                // verify that query expression returns StormEvents table
-                var qb = (QueryBlock)newCode.Syntax;
-                var expr = (qb.Statements[qb.Statements.Count - 1].Element as ExpressionStatement).Expression;
-                Assert.AreSame(storm, expr.ResultType);
             }
         }
 
