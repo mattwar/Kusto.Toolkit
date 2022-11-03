@@ -452,12 +452,14 @@ namespace Kushy
         private readonly string _schemaDirectoryPath;
         private readonly string _defaultClusterName;
         private readonly string _defaultDomain;
+        private readonly string _databaseNamesJsonFileName;
 
         public FileSymbolLoader(string schemaDirectoryPath, string defaultClusterName, string defaultDomain = null)
         {
             _schemaDirectoryPath = Environment.ExpandEnvironmentVariables(schemaDirectoryPath);
             _defaultClusterName = defaultClusterName;
             _defaultDomain = defaultDomain ?? KustoFacts.KustoWindowsNet;
+            _databaseNamesJsonFileName = "databaseNames.json";
         }
 
         public override string DefaultCluster => _defaultClusterName;
@@ -465,8 +467,7 @@ namespace Kushy
 
         public override Task<string[]> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
-            // TODO: load database names from cluster json file
-            return null;
+            return LoadDatabaseNamesAsync(clusterName, throwOnError, cancellationToken);
         }
 
         /// <summary>
@@ -520,6 +521,7 @@ namespace Kushy
                     }
 
                     await File.WriteAllTextAsync(databasePath, jsonText, cancellationToken).ConfigureAwait(false);
+                    await SaveDatabaseNameAsync(clusterName, database.Name, throwOnError, cancellationToken).ConfigureAwait(false);
 
                     return true;
                 }
@@ -823,6 +825,102 @@ namespace Kushy
             public string Name;
             public string Definition;
         }
+
+        private string GetDatabaseNamesFilePathForCluster(string clusterName)
+        {
+            var clusterPath = GetClusterCachePath(clusterName);
+            if (clusterPath != null)
+            {
+                return Path.Combine(clusterPath, "meta", _databaseNamesJsonFileName);
+            }
+            return null;
+        }
+
+        internal async Task<string[]> LoadDatabaseNamesAsync(string clusterName, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            var dbNamesPath = GetDatabaseNamesFilePathForCluster(clusterName);
+            if (dbNamesPath != null && File.Exists(dbNamesPath))
+            {
+                try
+                {
+                    var jsonText = await File.ReadAllTextAsync(dbNamesPath).ConfigureAwait(false);
+                    var dbNames = JsonConvert.DeserializeObject<string[]>(jsonText);
+                    if (dbNames != null)
+                    {
+                        return dbNames;
+                    }
+                }
+                catch (Exception) when (!throwOnError)
+                {
+                }
+            }
+
+            return null;
+        }
+
+        internal async Task<bool> SaveDatabaseNamesAsync(string clusterName, string[] databaseNames, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            if (databaseNames == null)
+            {
+                return false;
+            }
+            var dbNamesPath = GetDatabaseNamesFilePathForCluster(clusterName);
+            var parentDir = Path.GetDirectoryName(dbNamesPath);
+
+            try
+            {
+                if (!Directory.Exists(parentDir))
+                {
+                    Directory.CreateDirectory(parentDir);
+                }
+
+                var jsonText = JsonConvert.SerializeObject(databaseNames, s_serializationSettings);
+                await File.WriteAllTextAsync(dbNamesPath, jsonText, cancellationToken).ConfigureAwait(false);
+
+                return true;
+            }
+            catch (Exception) when (!throwOnError)
+            {
+            }
+
+            return false;
+        }
+
+        internal async Task<bool> SaveDatabaseNameAsync(string clusterName, string databaseName, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            if (String.IsNullOrEmpty(databaseName))
+            {
+                return false;
+            }
+
+            try
+            {
+                var dbNames = await LoadDatabaseNamesAsync(clusterName, true, cancellationToken);
+                bool nameAdded = false;
+                if (dbNames != null)
+                {
+                    var set = new SortedSet<string>(dbNames);
+                    nameAdded = set.Add(databaseName);
+                    dbNames = set.ToArray();
+                }
+                else
+                {
+                    dbNames = new string[] { databaseName };
+                    nameAdded = true;
+                }
+                if (nameAdded)
+                {
+                    await SaveDatabaseNamesAsync(clusterName, dbNames, throwOnError, cancellationToken);
+                }
+
+                return true;
+            }
+            catch (Exception) when (!throwOnError)
+            {
+            }
+
+            return false;
+        }
     }
 
     /// <summary>
@@ -870,7 +968,7 @@ namespace Kushy
 
                 if (names != null)
                 {
-                    // TODO: save database names to cluster json file
+                    await this.FileLoader.SaveDatabaseNamesAsync(clusterName, names, throwOnError, cancellationToken);
                 }
             }
 
@@ -929,7 +1027,7 @@ namespace Kushy
 
                 var service = new KustoCodeService(code);
                 var globals = await AddReferencedDatabasesAsync(code.Globals, service, throwOnError, cancellationToken).ConfigureAwait(false);
-                
+
                 if (globals == prevGlobals)
                     return code;
 
