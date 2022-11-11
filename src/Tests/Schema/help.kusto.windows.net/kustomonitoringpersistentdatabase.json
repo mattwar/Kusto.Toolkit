@@ -1,5 +1,6 @@
 {
   "Name": "KustoMonitoringPersistentDatabase",
+  "PrettyName": "",
   "Tables": [
     {
       "Name": "KustoMonitoringTable",

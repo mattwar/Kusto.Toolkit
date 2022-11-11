@@ -1,0 +1,53 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Kusto.Toolkit</AssemblyName>
+    <RootNamespace>$(AssemblyName)</RootNamespace>
+    <BaseOutputPath>bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath>obj\</BaseIntermediateOutputPath>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+    <SignAssembly>False</SignAssembly>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <PackageId>Kusto.Toolkit</PackageId>
+    <Title>$(AssemblyName)</Title>
+    <Authors>mattwar</Authors>
+    <Description>A library of tools to help you analyze Kusto queries.</Description>
+	<PackageProjectUrl>https://github.com/mattwar/Kushy</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/mattwar/Kushy</RepositoryUrl>
+    <PackageReadmeFile>NugetReadme.md</PackageReadmeFile>
+    <PackageTags>Kusto, KQL, C#, CSharp, DOTNET</PackageTags>
+    <PackageLicenseExpression> Apache-2.0</PackageLicenseExpression>
+    <Copyright>Copyright (c) Matt Warren 2022</Copyright>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <NoWarn>1701;1702;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <NoWarn>1701;1702;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Link="README.md" />
+    <None Include="..\.editorconfig" Link=".editorconfig" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Azure.Kusto.Data" Version="11.0.0" />
+    <PackageReference Include="Microsoft.Azure.Kusto.Language" Version="11.0.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="NugetReadme.md">
+      <Pack>True</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+</Project>

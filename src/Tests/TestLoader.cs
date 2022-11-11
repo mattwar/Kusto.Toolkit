@@ -1,13 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Kusto.Language;
-using Kushy;
 using Kusto.Language.Symbols;
-using System.Threading;
+using Kusto.Toolkit;
 
-namespace KushyTests
+namespace Tests
 {
     public class TestLoader : SymbolLoader
     {
@@ -23,17 +23,17 @@ namespace KushyTests
             _clusters = clusters;
         }
 
-        public override Task<string[]> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public override Task<IReadOnlyList<DatabaseName>> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
             var cluster = _clusters.FirstOrDefault(c => c.Name == clusterName);
             if (cluster != null)
             {
-                return Task.FromResult(cluster.Databases.Select(d => d.Name).ToArray());
+                return Task.FromResult<IReadOnlyList<DatabaseName>>(cluster.Databases.Select(d => new DatabaseName(d.Name, d.AlternateName)).ToArray());
             }
 
             else
             {
-                return Task.FromResult(new string[0]);
+                return Task.FromResult<IReadOnlyList<DatabaseName>>(new DatabaseName[0]);
             }
         }
 

@@ -7,10 +7,10 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Kusto.Language;
 using Kusto.Language.Syntax;
 using Kusto.Language.Editor;
-using Kushy;
 using Kusto.Language.Symbols;
+using Kusto.Toolkit;
 
-namespace KushyTests
+namespace Tests
 {
     [TestClass]
     public class SymbolResolverTests

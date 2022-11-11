@@ -19,7 +19,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\Kushy\Kushy.csproj" />
+	  <ProjectReference Include="..\Toolkit\Toolkit.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

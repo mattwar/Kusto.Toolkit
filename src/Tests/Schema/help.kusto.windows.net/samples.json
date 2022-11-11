@@ -1,5 +1,6 @@
 {
   "Name": "Samples",
+  "PrettyName": "",
   "Tables": [
     {
       "Name": "StormEvents",
@@ -12,11 +13,11 @@
     },
     {
       "Name": "demo_series2",
-      "Schema": "(['id']: string, x: dynamic, y: dynamic)"
+      "Schema": "(id: string, x: dynamic, y: dynamic)"
     },
     {
       "Name": "demo_series3",
-      "Schema": "(['id']: string, t: dynamic, num: dynamic)"
+      "Schema": "(id: string, t: dynamic, num: dynamic)"
     },
     {
       "Name": "demo_many_series1",
@@ -263,7 +264,7 @@
     {
       "Name": "GetStatesWithPopulationSmallerThan",
       "Parameters": "(amount: long)",
-      "Body": "{ \r\n    PopulationData\r\n    | where Population < amount\r\n    | project State;\r\n}"
+      "Body": "{ \n    PopulationData\n    | where Population < amount\n    | project State;\n}"
     },
     {
       "Name": "factorial_fl",

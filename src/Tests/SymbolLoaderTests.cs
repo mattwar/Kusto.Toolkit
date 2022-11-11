@@ -4,12 +4,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Kusto.Language;
-using Kusto.Language.Syntax;
-using Kusto.Language.Editor;
-using Kushy;
+using Kusto.Toolkit;
 using Kusto.Language.Symbols;
 
-namespace KushyTests
+namespace Tests
 {
     [TestClass]
     public class SymbolLoaderTests
@@ -66,7 +64,7 @@ namespace KushyTests
             using (var loader = new ServerSymbolLoader(HelpConnection))
             {
                 var names = await loader.GetDatabaseNamesAsync();
-                Assert.IsTrue(names.Contains("Samples"));
+                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
             }
         }
 
