@@ -55,6 +55,122 @@ namespace Tests
         }
 
         [TestMethod]
+        public async Task TestAddReferencedDatabasesAsync_NoDefaultDatabase()
+        {
+            var clusters = new ClusterSymbol[]
+            {
+                new ClusterSymbol("cluster1.kusto.windows.net",
+                    new DatabaseSymbol("db1",
+                        new TableSymbol("Table1", "(x: long)")),
+                    new DatabaseSymbol("db2",
+                        new TableSymbol("Table2", "(x: long)")))
+            };
+
+            var loader = new TestLoader(clusters, "cluster1");
+            var resolver = new SymbolResolver(loader);
+
+            // set default database.
+            //var globals = await loader.AddOrUpdateDefaultDatabaseAsync(GlobalState.Default, "db1");
+            var globals = GlobalState.Default.WithCluster(
+                new ClusterSymbol("cluster1.kusto.windows.net"));
+
+            // no database should exist
+            Assert.AreEqual(0, globals.Cluster.Databases.Count);
+
+            // parse query that has explicit reference to other database
+            var code = KustoCode.ParseAndAnalyze("database('db2').Table2", globals);
+
+            // use loader to add symbols for any explicity referenced databases
+            var newCode = await resolver.AddReferencedDatabasesAsync(code);
+
+            // both databases should exist now
+            Assert.AreEqual(1, newCode.Globals.Cluster.Databases.Count);
+
+            // find table in database
+            var db2 = newCode.Globals.Cluster.GetDatabase("db2");
+            var table2 = db2.GetTable("Table2");
+
+            // verify reference to Table2 actually is Table2
+            var expr = newCode.Syntax.GetFirstDescendant<NameReference>(nr => nr.SimpleName == "Table2");
+            Assert.AreSame(table2, expr.ResultType);
+        }
+
+        [TestMethod]
+        public async Task TestAddReferencedDatabasesAsync_NoDefaultCluster()
+        {
+            var clusters = new ClusterSymbol[]
+            {
+                new ClusterSymbol("cluster1.kusto.windows.net",
+                    new DatabaseSymbol("db1",
+                        new TableSymbol("Table1", "(x: long)")),
+                    new DatabaseSymbol("db2",
+                        new TableSymbol("Table2", "(x: long)")))
+            };
+
+            var loader = new TestLoader(clusters, "cluster1");
+            var resolver = new SymbolResolver(loader);
+
+            // no defaults set
+            var globals = GlobalState.Default;
+
+            // no database should exist
+            Assert.AreEqual(0, globals.Cluster.Databases.Count);
+
+            // parse query that has explicit reference to other database
+            var code = KustoCode.ParseAndAnalyze("database('db2').Table2", globals);
+
+            // use loader to add symbols for any explicity referenced databases
+            var newCode = await resolver.AddReferencedDatabasesAsync(code);
+
+            // nothing happened because we used unknown cluster as default
+            Assert.AreSame(code, newCode);
+        }
+
+        [TestMethod]
+        public async Task TestAddReferencedDatabasesAsync_NoDefaultCluster_ClusterSpecified()
+        {
+            var clusters = new ClusterSymbol[]
+            {
+                new ClusterSymbol("cluster1.kusto.windows.net",
+                    new DatabaseSymbol("db1",
+                        new TableSymbol("Table1", "(x: long)")),
+                    new DatabaseSymbol("db2",
+                        new TableSymbol("Table2", "(x: long)")))
+            };
+
+            var loader = new TestLoader(clusters, "cluster1");
+            var resolver = new SymbolResolver(loader);
+
+            // no defaults set
+            var globals = GlobalState.Default;
+
+            // parse query that has explicit reference to another database
+            var code = KustoCode.ParseAndAnalyze("cluster('cluster1').database('db2').Table2", globals);
+
+            // use loader to add symbols for any explicity referenced databases
+            var newCode = await resolver.AddReferencedDatabasesAsync(code);
+
+            // we should have a difference code because globals should have changed
+            Assert.AreNotSame(code, newCode);
+
+            // default cluster should still be empty
+            Assert.AreEqual(0, newCode.Globals.Cluster.Databases.Count);
+
+            // but cluster should exist and be populated with the table
+            var cluster = newCode.Globals.GetCluster("cluster1");
+            Assert.IsNotNull(cluster);
+            Assert.AreNotEqual(0, cluster.Databases.Count);
+
+            // find database and table
+            var db2 = cluster.GetDatabase("db2");
+            var table2 = db2.GetTable("Table2");
+
+            // verify reference to Table2 actually is Table2
+            var expr = newCode.Syntax.GetFirstDescendant<NameReference>(nr => nr.SimpleName == "Table2");
+            Assert.AreSame(table2, expr.ResultType);
+        }
+
+        [TestMethod]
         public async Task TestAddReferencedDatabasesAsync_CodeScript()
         {
             var clusters = new ClusterSymbol[]

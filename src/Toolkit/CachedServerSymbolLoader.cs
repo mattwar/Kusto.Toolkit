@@ -49,7 +49,7 @@ namespace Kusto.Toolkit
 
                 if (names != null)
                 {
-                    await this.FileLoader.SaveDatabaseNamesAsync(clusterName, names, throwOnError, cancellationToken);
+                    await this.FileLoader.SaveDatabaseNamesAsync(clusterName, names, throwOnError, cancellationToken).ConfigureAwait(false);
                 }
             }
 

@@ -34,6 +34,8 @@ namespace Kusto.Toolkit
         public ServerSymbolLoader(string clusterConnection, string defaultDomain = null)
             : this(new KustoConnectionStringBuilder(clusterConnection), defaultDomain)
         {
+            if (clusterConnection == null)
+                throw new ArgumentNullException(nameof(clusterConnection));
         }
 
         /// <summary>
@@ -45,6 +47,9 @@ namespace Kusto.Toolkit
         /// </param>
         public ServerSymbolLoader(KustoConnectionStringBuilder clusterConnection, string defaultDomain = null)
         {
+            if (clusterConnection == null)
+                throw new ArgumentNullException(nameof(clusterConnection));
+
             _defaultConnection = clusterConnection;
             _defaultClusterName = GetHost(clusterConnection);
             _defaultDomain = String.IsNullOrEmpty(defaultDomain)
@@ -102,11 +107,33 @@ namespace Kusto.Toolkit
             var connection = GetClusterConnection(clusterName);
             var provider = GetOrCreateAdminProvider(connection);
 
-            var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(provider, "", ".show databases", throwOnError, cancellationToken);
+            var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(
+                provider, database: "", 
+                ".show databases",
+                throwOnError, cancellationToken)
+                .ConfigureAwait(false);
+
             if (databases == null)
                 return null;
 
             return databases.Select(d => new DatabaseName(d.DatabaseName, d.PrettyName)).ToArray();
+        }
+
+        private bool IsBadDatabaseName(string clusterName, string databaseName)
+        {
+            return _clusterToBadDbNameMap.TryGetValue(clusterName, out var badDbNames)
+                && badDbNames.Contains(databaseName);
+        }
+
+        private void AddBadDatabasename(string clusterName, string databaseName)
+        {
+            if (!_clusterToBadDbNameMap.TryGetValue(clusterName, out var badDbNames))
+            {
+                badDbNames = new HashSet<string>();
+                _clusterToBadDbNameMap.Add(clusterName, badDbNames);
+            }
+
+            badDbNames.Add(databaseName);
         }
 
         /// <summary>
@@ -114,34 +141,40 @@ namespace Kusto.Toolkit
         /// </summary>
         public override async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
+            if (databaseName == null)
+                throw new ArgumentNullException(nameof(databaseName));
+
             clusterName = string.IsNullOrEmpty(clusterName)
                 ? _defaultClusterName
                 : GetFullHostName(clusterName, _defaultDomain);
 
             // if we've already determined this database name is bad, then bail out
-            if (_clusterToBadDbNameMap.TryGetValue(clusterName, out var badDbNames)
-                && badDbNames.Contains(databaseName))
+            if (IsBadDatabaseName(clusterName, databaseName))
                 return null;
 
             var connection = GetClusterConnection(clusterName);
             var provider = GetOrCreateAdminProvider(connection);
 
-            var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(provider, "", 
-                ".show databases", 
-                throwOnError, cancellationToken);
-            if (databases == null)
-                return null;
+            // get database name & pretty name from .show databases
+            var dbNameLiteral = KustoFacts.GetStringLiteral(databaseName);
+            var dbInfo = (await ExecuteControlCommandAsync<ShowDatabasesResult>(
+                provider, database: "",
+                $".show databases | where DatabaseName == {dbNameLiteral} or PrettyName == {dbNameLiteral}",
+                throwOnError, cancellationToken))
+                .FirstOrDefault();
 
+            if (dbInfo == null)
+            {
+                AddBadDatabasename(clusterName, databaseName);
+                return null;
+            }
+
+            databaseName = dbInfo.DatabaseName;
 
             var tables = await LoadTablesAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
             if (tables == null)
             {
-                if (badDbNames == null)
-                {
-                    badDbNames = new HashSet<string>();
-                    _clusterToBadDbNameMap.Add(clusterName, badDbNames);
-                }
-                badDbNames.Add(databaseName);
+                AddBadDatabasename(clusterName, databaseName);
                 return null;
             }
 
@@ -157,7 +190,7 @@ namespace Kusto.Toolkit
             members.AddRange(functions);
             members.AddRange(entityGroups);
 
-            var databaseSymbol = new DatabaseSymbol(databaseName, members);
+            var databaseSymbol = new DatabaseSymbol(dbInfo.DatabaseName, dbInfo.PrettyName, members);
             return databaseSymbol;
         }
 
@@ -166,7 +199,11 @@ namespace Kusto.Toolkit
             var tables = new List<TableSymbol>();
 
             // get table schema from .show database xxx schema
-            var databaseSchemas = await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(provider, databaseName, $".show database {databaseName} schema", throwOnError, cancellationToken).ConfigureAwait(false);
+            var databaseSchemas = await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(
+                provider, databaseName,
+                $".show database {KustoFacts.GetBracketedName(databaseName)} schema", 
+                throwOnError, cancellationToken)
+                .ConfigureAwait(false);
             if (databaseSchemas == null)
                 return null;
 
@@ -192,7 +229,11 @@ namespace Kusto.Toolkit
             {
                 foreach (var et in externalTables)
                 {
-                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(provider, databaseName, $".show external table {et.TableName} cslschema", throwOnError, cancellationToken);
+                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(
+                        provider, databaseName,
+                        $".show external table {KustoFacts.GetBracketedName(et.TableName)} cslschema",
+                        throwOnError, cancellationToken)
+                        .ConfigureAwait(false);
                     if (etSchemas != null && etSchemas.Length > 0)
                     {
                         var mvSymbol = new ExternalTableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString);
@@ -209,12 +250,19 @@ namespace Kusto.Toolkit
             var tables = new List<TableSymbol>();
 
             // get materialized views from .show materialized-views and .show materialized-view xxx cslschema
-            var materializedViews = await ExecuteControlCommandAsync<ShowMaterializedViewsResult>(provider, databaseName, ".show materialized-views", throwOnError, cancellationToken); ;
+            var materializedViews = await ExecuteControlCommandAsync<ShowMaterializedViewsResult>(
+                provider, databaseName, 
+                ".show materialized-views", 
+                throwOnError, cancellationToken); ;
             if (materializedViews != null)
             {
                 foreach (var mv in materializedViews)
                 {
-                    var mvSchemas = await ExecuteControlCommandAsync<ShowMaterializedViewSchemaResult>(provider, databaseName, $".show materialized-view {mv.Name} cslschema", throwOnError, cancellationToken);
+                    var mvSchemas = await ExecuteControlCommandAsync<ShowMaterializedViewSchemaResult>(
+                        provider, databaseName, 
+                        $".show materialized-view {KustoFacts.GetBracketedName(mv.Name)} cslschema", 
+                        throwOnError, cancellationToken)
+                        .ConfigureAwait(false);
                     if (mvSchemas != null && mvSchemas.Length > 0)
                     {
                         var mvSymbol = new MaterializedViewSymbol(mv.Name, "(" + mvSchemas[0].Schema + ")", mv.Query, mv.DocString);
@@ -231,7 +279,11 @@ namespace Kusto.Toolkit
             var functions = new List<FunctionSymbol>();
 
             // get functions for .show functions
-            var functionSchemas = await ExecuteControlCommandAsync<ShowFunctionsResult>(provider, databaseName, ".show functions", throwOnError, cancellationToken).ConfigureAwait(false);
+            var functionSchemas = await ExecuteControlCommandAsync<ShowFunctionsResult>(
+                provider, databaseName, 
+                ".show functions", 
+                throwOnError, cancellationToken)
+                .ConfigureAwait(false);
             if (functionSchemas == null)
                 return null;
 
@@ -249,7 +301,11 @@ namespace Kusto.Toolkit
             var entityGroupSymbols = new List<EntityGroupSymbol>();
 
             // get entity groups via .show entity_groups
-            var entityGroups = await ExecuteControlCommandAsync<ShowEntityGroupsResult>(provider, databaseName, ".show entity_groups", throwOnError, cancellationToken).ConfigureAwait(false);
+            var entityGroups = await ExecuteControlCommandAsync<ShowEntityGroupsResult>(
+                provider, databaseName, 
+                ".show entity_groups",
+                throwOnError, cancellationToken)
+                .ConfigureAwait(false);
             if (entityGroups == null)
                 return null;
 

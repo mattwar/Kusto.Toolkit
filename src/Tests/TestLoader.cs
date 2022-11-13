@@ -16,10 +16,12 @@ namespace Tests
 
         private readonly IReadOnlyList<ClusterSymbol> _clusters;
 
-        public TestLoader(IReadOnlyList<ClusterSymbol> clusters, string defaultCluster, string defaultDomain = null)
+        public TestLoader(IReadOnlyList<ClusterSymbol> clusters, string defaultCluster = null, string defaultDomain = null)
         {
             this.DefaultDomain = defaultDomain ?? KustoFacts.KustoWindowsNet;
-            this.DefaultCluster = SymbolFacts.GetFullHostName(defaultCluster, this.DefaultDomain);
+            this.DefaultCluster = defaultCluster != null
+                ? SymbolFacts.GetFullHostName(defaultCluster, this.DefaultDomain)
+                : clusters[0].Name;
             _clusters = clusters;
         }
 
@@ -45,6 +47,11 @@ namespace Tests
             if (cluster != null)
             {
                 var db = cluster.GetDatabase(databaseName);
+                if (db != null)
+                {
+                    // make a new instance to behave like server/file loaders
+                    db = db.WithMembers(db.Members.ToList());
+                }
                 return Task.FromResult(db);
             }
 

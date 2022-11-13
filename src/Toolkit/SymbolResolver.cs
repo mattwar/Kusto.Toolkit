@@ -12,7 +12,8 @@ namespace Kusto.Toolkit
     public class SymbolResolver
     {
         private readonly SymbolLoader _loader;
-        private readonly HashSet<string> _ignoreClusterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, HashSet<string>> _clustersResolvedOrInvalid
+            = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
         /// Creates a new <see cref="SymbolResolver"/> instance that is used to resolve cluster/database references in kusto queries.
@@ -21,6 +22,12 @@ namespace Kusto.Toolkit
         {
             _loader = loader;
         }
+
+        /// <summary>
+        /// Maximum loops allowed when checking for additional references after just adding referenced database schema.
+        /// If this is exceeded then there is probably a bug that keeps updating the globals even when no new found databases are added.
+        /// </summary>
+        private const int MaxLoopCount = 20;
 
         /// <summary>
         /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the query but not already present in the <see cref="GlobalState"/>.
@@ -34,19 +41,20 @@ namespace Kusto.Toolkit
             }
 
             // keep looping until no more databases are added to globals
-            while (true)
+            for (int loopCount = 0; loopCount < MaxLoopCount; loopCount++)
             {
-                var prevGlobals = code.Globals;
-
                 var service = new KustoCodeService(code);
                 var globals = await AddReferencedDatabasesAsync(code.Globals, service, throwOnError, cancellationToken).ConfigureAwait(false);
 
-                if (globals == prevGlobals)
-                    return code;
+                // if no databases were added we are done
+                if (globals == code.Globals)
+                    break;
 
                 code = code.WithGlobals(globals);
                 code = code.Analyze(cancellationToken: cancellationToken);
             }
+
+            return code;
         }
 
         /// <summary>
@@ -55,22 +63,22 @@ namespace Kusto.Toolkit
         public async Task<CodeScript> AddReferencedDatabasesAsync(CodeScript script, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
             // keep looping until no more databases are added to globals
-            while (true)
+            for (int loopCount = 0; loopCount < MaxLoopCount; loopCount++)
             {
-                var prevGlobals = script.Globals;
-
                 var currentGlobals = script.Globals;
                 foreach (var block in script.Blocks)
                 {
                     currentGlobals = await AddReferencedDatabasesAsync(currentGlobals, block.Service, throwOnError, cancellationToken).ConfigureAwait(false);
                 }
 
-                // if nothing was added we are done
-                if (currentGlobals == prevGlobals)
-                    return script;
+                // if no databases were added we are done
+                if (currentGlobals == script.Globals)
+                    break;
 
                 script = script.WithGlobals(currentGlobals);
             }
+
+            return script;
         }
 
         /// <summary>
@@ -78,57 +86,58 @@ namespace Kusto.Toolkit
         /// </summary>
         private async Task<GlobalState> AddReferencedDatabasesAsync(GlobalState globals, CodeService service, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
-            // find all explicit cluster (xxx) references
+            // find all explicit cluster('xxx') references
             var clusterRefs = service.GetClusterReferences(cancellationToken);
             foreach (ClusterReference clusterRef in clusterRefs)
             {
                 var clusterName = SymbolFacts.GetFullHostName(clusterRef.Cluster, _loader.DefaultDomain);
 
-                // don't bother with cluster names that we've already shown to not exist
-                if (_ignoreClusterNames.Contains(clusterName))
+                // don't bother with clusters were already resolved or do not exist
+                if (string.IsNullOrEmpty(clusterName)
+                    || _clustersResolvedOrInvalid.ContainsKey(clusterName))
                     continue;
+
+                _clustersResolvedOrInvalid.Add(clusterName, new HashSet<string>());
 
                 var cluster = globals.GetCluster(clusterName);
                 if (cluster == null || cluster.IsOpen)
                 {
-                    // check to see if this is an actual cluster and get all database names
-                    var databaseNames = await _loader.GetDatabaseNamesAsync(clusterName, throwOnError).ConfigureAwait(false);
-                    if (databaseNames != null)
-                    {
-                        // initially populate with empty 'open' databases. These will get updated to full schema if referenced
-                        var databases = databaseNames.Select(db => new DatabaseSymbol(db.Name, db.PrettyName, null, isOpen: true)).ToArray();
-                        cluster = new ClusterSymbol(clusterName, databases);
-                        globals = globals.WithClusterList(globals.Clusters.Concat(new[] { cluster }).ToArray());
-                    }
+                    globals = await _loader.AddOrUpdateClusterAsync(globals, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
                 }
-
-                // we already have all the known schema for this cluster
-                _ignoreClusterNames.Add(clusterName);
             }
 
-            // examine all explicit database(xxx) references
+            // find all explicit database('xxx') references
             var dbRefs = service.GetDatabaseReferences(cancellationToken);
             foreach (DatabaseReference dbRef in dbRefs)
             {
-                var clusterName = string.IsNullOrEmpty(dbRef.Cluster)
-                    ? null
-                    : SymbolFacts.GetFullHostName(dbRef.Cluster, _loader.DefaultDomain);
-
-                // get implicit or explicit named cluster
-                var cluster = string.IsNullOrEmpty(clusterName)
+                var cluster = string.IsNullOrEmpty(dbRef.Cluster)
                     ? globals.Cluster
-                    : globals.GetCluster(clusterName);
+                    : globals.GetCluster(SymbolFacts.GetFullHostName(dbRef.Cluster, _loader.DefaultDomain));
 
-                if (cluster != null)
+                // don't rely on the user to do the right thing.
+                if (cluster == null 
+                    || cluster == ClusterSymbol.Unknown 
+                    || string.IsNullOrEmpty(cluster.Name)
+                    || string.IsNullOrEmpty(dbRef.Database))
+                    continue;
+
+                if (!_clustersResolvedOrInvalid.TryGetValue(cluster.Name, out var dbsResolvedOrInvalid))
                 {
-                    var db = cluster.GetDatabase(dbRef.Database);
+                    dbsResolvedOrInvalid = new HashSet<string>();
+                    _clustersResolvedOrInvalid.Add(cluster.Name, dbsResolvedOrInvalid);
+                }
 
-                    // is this one of those not-yet-populated databases?
-                    if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
-                    {
-                        var newGlobals = await _loader.AddOrUpdateDatabaseAsync(globals, dbRef.Database, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
-                        globals = newGlobals != null ? newGlobals : globals;
-                    }
+                // don't bother with databases already resolved no do not exist
+                if (dbsResolvedOrInvalid.Contains(dbRef.Database))
+                    continue;
+
+                dbsResolvedOrInvalid.Add(dbRef.Database);
+
+                var db = cluster.GetDatabase(dbRef.Database);
+                if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
+                {
+                    var newGlobals = await _loader.AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, throwOnError, cancellationToken).ConfigureAwait(false);
+                    globals = newGlobals ?? globals;
                 }
             }
 

@@ -17,14 +17,12 @@ namespace Kusto.Toolkit
         private readonly string _schemaDirectoryPath;
         private readonly string _defaultClusterName;
         private readonly string _defaultDomain;
-        private readonly string _databaseNamesJsonFileName;
 
         public FileSymbolLoader(string schemaDirectoryPath, string defaultClusterName, string defaultDomain = null)
         {
             _schemaDirectoryPath = Environment.ExpandEnvironmentVariables(schemaDirectoryPath);
             _defaultClusterName = defaultClusterName;
             _defaultDomain = defaultDomain ?? KustoFacts.KustoWindowsNet;
-            _databaseNamesJsonFileName = "databaseNames.json";
         }
 
         public override string DefaultCluster => _defaultClusterName;
@@ -40,6 +38,12 @@ namespace Kusto.Toolkit
         /// </summary>
         public override async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
+            if (databaseName == null)
+                throw new ArgumentNullException(nameof(databaseName));
+
+            if (string.IsNullOrWhiteSpace(databaseName))
+                throw new ArgumentException("Invalid database name", nameof(databaseName));
+
             var databasePath = GetDatabaseCachePath(databaseName, clusterName);
 
             if (databasePath != null)
@@ -66,6 +70,9 @@ namespace Kusto.Toolkit
         /// </summary>
         public async Task<bool> SaveDatabaseAsync(DatabaseSymbol database, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
+            if (database == null)
+                throw new ArgumentNullException(nameof(database));
+
             var clusterPath = GetClusterCachePath(clusterName);
             var databasePath = GetDatabaseCachePath(database.Name, clusterName);
 
@@ -104,6 +111,9 @@ namespace Kusto.Toolkit
         /// </summary>
         public async Task SaveClusterAsync(ClusterSymbol cluster, CancellationToken cancellationToken = default)
         {
+            if (cluster == null)
+                throw new ArgumentNullException(nameof(cluster));
+
             foreach (var db in cluster.Databases)
             {
                 var _ = await SaveDatabaseAsync(db, cluster.Name, throwOnError: false, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -115,6 +125,9 @@ namespace Kusto.Toolkit
         /// </summary>
         public async Task SaveClustersAsync(IEnumerable<ClusterSymbol> clusters, CancellationToken cancellationToken = default)
         {
+            if (clusters == null)
+                throw new ArgumentNullException(nameof(clusters));
+
             foreach (var cluster in clusters)
             {
                 await SaveClusterAsync(cluster, cancellationToken).ConfigureAwait(false);
@@ -133,6 +146,9 @@ namespace Kusto.Toolkit
         /// </summary>
         public static string SerializeDatabase(DatabaseSymbol database)
         {
+            if (database == null)
+                throw new ArgumentNullException(nameof(database));
+
             var dbInfo = CreateDatabaseInfo(database);
             return JsonConvert.SerializeObject(dbInfo, s_serializationSettings);
         }
@@ -142,6 +158,9 @@ namespace Kusto.Toolkit
         /// </summary>
         public static DatabaseSymbol DeserializeDatabase(string serializedDatabase)
         {
+            if (serializedDatabase == null)
+                throw new ArgumentException(nameof(serializedDatabase));
+
             var dbInfo = JsonConvert.DeserializeObject<DatabaseInfo>(serializedDatabase);
             return CreateDatabaseSymbol(dbInfo);
         }
@@ -195,6 +214,142 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
+        /// Returns the list of saved database names for the cluster.
+        /// </summary>
+        public async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            if (clusterName == null)
+                throw new ArgumentNullException(nameof(clusterName));
+
+            var dbNamesPath = GetDatabaseNamesFilePath(clusterName);
+            if (dbNamesPath != null && File.Exists(dbNamesPath))
+            {
+                try
+                {
+                    var jsonText = await File.ReadAllTextAsync(dbNamesPath).ConfigureAwait(false);
+                    var dbNames = JsonConvert.DeserializeObject<DatabaseNameInfo[]>(jsonText);
+                    if (dbNames != null)
+                    {
+                        return dbNames.Select(info => new DatabaseName(info.Name, info.PrettyName)).ToArray();
+                    }
+                }
+                catch (Exception) when (!throwOnError)
+                {
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Saves and overwrites the entire list of database names.
+        /// Returns true if successful or false if not.
+        /// </summary>
+        public async Task<bool> SaveDatabaseNamesAsync(string clusterName, IReadOnlyList<DatabaseName> databaseNames, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            if (clusterName == null)
+                throw new ArgumentNullException(nameof(clusterName));
+
+            if (databaseNames == null)
+                throw new ArgumentNullException(nameof(databaseNames));
+
+            var dbNamesPath = GetDatabaseNamesFilePath(clusterName);
+            var parentDir = Path.GetDirectoryName(dbNamesPath);
+
+            try
+            {
+                if (!Directory.Exists(parentDir))
+                {
+                    Directory.CreateDirectory(parentDir);
+                }
+
+                var dbNameInfos = databaseNames.Select(dn => new DatabaseNameInfo { Name = dn.Name, PrettyName = dn.PrettyName }).ToArray();
+                var jsonText = JsonConvert.SerializeObject(dbNameInfos, s_serializationSettings);
+                await File.WriteAllTextAsync(dbNamesPath, jsonText, cancellationToken).ConfigureAwait(false);
+
+                return true;
+            }
+            catch (Exception) when (!throwOnError)
+            {
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Adds the database name to the list of saved database names.
+        /// Returns true if successful or false if not.
+        /// </summary>
+        public async Task<bool> SaveDatabaseNameAsync(string clusterName, DatabaseName databaseName, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            if (clusterName == null)
+                throw new ArgumentNullException(nameof(clusterName));
+
+            if (databaseName == null)
+                throw new ArgumentNullException(nameof(databaseName));
+
+            if (String.IsNullOrEmpty(databaseName.Name))
+            {
+                return false;
+            }
+
+            try
+            {
+                var dbNames = await LoadDatabaseNamesAsync(clusterName, true, cancellationToken).ConfigureAwait(false);
+                bool nameAdded = false;
+                if (dbNames != null)
+                {
+                    var set = new SortedSet<DatabaseName>(dbNames, DatabaseNameComparer.Instance);
+                    nameAdded = set.Add(databaseName);
+                    dbNames = set.ToArray();
+                }
+                else
+                {
+                    dbNames = new[] { databaseName };
+                    nameAdded = true;
+                }
+                if (nameAdded)
+                {
+                    await SaveDatabaseNamesAsync(clusterName, dbNames, throwOnError, cancellationToken).ConfigureAwait(false);
+                }
+
+                return true;
+            }
+            catch (Exception) when (!throwOnError)
+            {
+            }
+
+            return false;
+        }
+
+        private class DatabaseNameComparer : IComparer<DatabaseName>
+        {
+            private DatabaseNameComparer() { }
+
+            public int Compare(DatabaseName x, DatabaseName y)
+            {
+                return x.Name.CompareTo(y.Name);
+            }
+
+            public static readonly DatabaseNameComparer Instance = new DatabaseNameComparer();
+        }
+
+        /// <summary>
+        /// Gets the path to the database names file.
+        /// </summary>
+        public string GetDatabaseNamesFilePath(string clusterName)
+        {
+            var clusterPath = GetClusterCachePath(clusterName);
+            
+            if (clusterPath != null)
+            {
+                return Path.Combine(clusterPath, "databaseNames.json");
+            }
+
+            return null;
+        }
+
+        /// <summary>
         /// Gets path to the cluster cache directory within the schema cache directory.
         /// </summary>
         public string GetClusterCachePath(string clusterName = null)
@@ -212,6 +367,9 @@ namespace Kusto.Toolkit
         /// </summary>
         public string GetDatabaseCachePath(string databaseName, string clusterName = null)
         {
+            if (databaseName == null)
+                throw new ArgumentNullException(nameof(databaseName));
+
             clusterName = clusterName ?? _defaultClusterName;
             if (clusterName == null)
                 return null;
@@ -398,115 +556,6 @@ namespace Kusto.Toolkit
         {
             public string Name;
             public string Definition;
-        }
-
-        private string GetDatabaseNamesFilePathForCluster(string clusterName)
-        {
-            var clusterPath = GetClusterCachePath(clusterName);
-            if (clusterPath != null)
-            {
-                return Path.Combine(clusterPath, _databaseNamesJsonFileName);
-            }
-            return null;
-        }
-
-        internal async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName, bool throwOnError = false, CancellationToken cancellationToken = default)
-        {
-            var dbNamesPath = GetDatabaseNamesFilePathForCluster(clusterName);
-            if (dbNamesPath != null && File.Exists(dbNamesPath))
-            {
-                try
-                {
-                    var jsonText = await File.ReadAllTextAsync(dbNamesPath).ConfigureAwait(false);
-                    var dbNames = JsonConvert.DeserializeObject<DatabaseNameInfo[]>(jsonText);
-                    if (dbNames != null)
-                    {
-                        return dbNames.Select(info => new DatabaseName(info.Name, info.PrettyName)).ToArray();
-                    }
-                }
-                catch (Exception) when (!throwOnError)
-                {
-                }
-            }
-
-            return null;
-        }
-
-        internal async Task<bool> SaveDatabaseNamesAsync(string clusterName, IReadOnlyList<DatabaseName> databaseNames, bool throwOnError = false, CancellationToken cancellationToken = default)
-        {
-            if (databaseNames == null)
-            {
-                return false;
-            }
-            var dbNamesPath = GetDatabaseNamesFilePathForCluster(clusterName);
-            var parentDir = Path.GetDirectoryName(dbNamesPath);
-
-            try
-            {
-                if (!Directory.Exists(parentDir))
-                {
-                    Directory.CreateDirectory(parentDir);
-                }
-
-                var dbNameInfos = databaseNames.Select(dn => new DatabaseNameInfo { Name = dn.Name, PrettyName = dn.PrettyName }).ToArray();
-                var jsonText = JsonConvert.SerializeObject(dbNameInfos, s_serializationSettings);
-                await File.WriteAllTextAsync(dbNamesPath, jsonText, cancellationToken).ConfigureAwait(false);
-
-                return true;
-            }
-            catch (Exception) when (!throwOnError)
-            {
-            }
-
-            return false;
-        }
-
-        internal async Task<bool> SaveDatabaseNameAsync(string clusterName, DatabaseName databaseName, bool throwOnError = false, CancellationToken cancellationToken = default)
-        {
-            if (String.IsNullOrEmpty(databaseName.Name))
-            {
-                return false;
-            }
-
-            try
-            {
-                var dbNames = await LoadDatabaseNamesAsync(clusterName, true, cancellationToken);
-                bool nameAdded = false;
-                if (dbNames != null)
-                {
-                    var set = new SortedSet<DatabaseName>(dbNames, DatabaseNameComparer.Instance);
-                    nameAdded = set.Add(databaseName);
-                    dbNames = set.ToArray();
-                }
-                else
-                {
-                    dbNames = new [] { databaseName };
-                    nameAdded = true;
-                }
-                if (nameAdded)
-                {
-                    await SaveDatabaseNamesAsync(clusterName, dbNames, throwOnError, cancellationToken);
-                }
-
-                return true;
-            }
-            catch (Exception) when (!throwOnError)
-            {
-            }
-
-            return false;
-        }
-
-        private class DatabaseNameComparer : IComparer<DatabaseName>
-        {
-            private DatabaseNameComparer() { }
-
-            public int Compare(DatabaseName x, DatabaseName y)
-            {
-                return x.Name.CompareTo(y.Name);
-            }
-
-            public static readonly DatabaseNameComparer Instance = new DatabaseNameComparer();
         }
     }
 }
