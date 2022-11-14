@@ -20,21 +20,134 @@ namespace Kusto.Toolkit
 
         public FileSymbolLoader(string schemaDirectoryPath, string defaultClusterName, string defaultDomain = null)
         {
+            if (schemaDirectoryPath == null)
+                throw new ArgumentNullException(nameof(schemaDirectoryPath));
+
+            if (defaultClusterName == null)
+                throw new ArgumentNullException(nameof(defaultClusterName));
+
+            if (string.IsNullOrEmpty(schemaDirectoryPath))
+                throw new ArgumentNullException("Invalid schema directory path", nameof(schemaDirectoryPath));
+
+            if (string.IsNullOrWhiteSpace(defaultClusterName))
+                throw new ArgumentNullException("Invalid default cluster name", nameof(defaultClusterName));
+
             _schemaDirectoryPath = Environment.ExpandEnvironmentVariables(schemaDirectoryPath);
-            _defaultClusterName = defaultClusterName;
             _defaultDomain = defaultDomain ?? KustoFacts.KustoWindowsNet;
+            _defaultClusterName = GetFullHostName(defaultClusterName, _defaultDomain);
         }
 
         public override string DefaultCluster => _defaultClusterName;
         public override string DefaultDomain => _defaultDomain;
 
-        public override Task<IReadOnlyList<DatabaseName>> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Loads a list of database names for the specified cluster.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// Returns null if the cluster is not found.
+        /// </summary>
+        public override async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
-            return LoadDatabaseNamesAsync(clusterName, throwOnError, cancellationToken);
+            var dbNamesPath = GetDatabaseNamesPath(clusterName);
+            if (dbNamesPath != null && File.Exists(dbNamesPath))
+            {
+                try
+                {
+                    var jsonText = await File.ReadAllTextAsync(dbNamesPath).ConfigureAwait(false);
+                    var dbNames = JsonConvert.DeserializeObject<DatabaseNameInfo[]>(jsonText);
+                    if (dbNames != null)
+                    {
+                        return dbNames.Select(info => new DatabaseName(info.Name, info.PrettyName)).ToArray();
+                    }
+                }
+                catch (Exception) when (!throwOnError)
+                {
+                }
+            }
+
+            return null;
         }
 
         /// <summary>
-        /// Loads the named database schema from the cache.
+        /// Saves the list of database names in the cache for the specified cluster.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// Returns true if successful or false if not.
+        /// </summary>
+        public async Task<bool> SaveDatabaseNamesAsync(IReadOnlyList<DatabaseName> databaseNames, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            if (databaseNames == null)
+                throw new ArgumentNullException(nameof(databaseNames));
+
+            var dbNamesPath = GetDatabaseNamesPath(clusterName);
+            var parentDir = Path.GetDirectoryName(dbNamesPath);
+
+            try
+            {
+                if (!Directory.Exists(parentDir))
+                {
+                    Directory.CreateDirectory(parentDir);
+                }
+
+                var dbNameInfos = databaseNames.Select(dn => new DatabaseNameInfo { Name = dn.Name, PrettyName = dn.PrettyName }).ToArray();
+                var jsonText = JsonConvert.SerializeObject(dbNameInfos, s_serializationSettings);
+                await File.WriteAllTextAsync(dbNamesPath, jsonText, cancellationToken).ConfigureAwait(false);
+
+                return true;
+            }
+            catch (Exception) when (!throwOnError)
+            {
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Adds the database name to the list of saved database names for the specified cluster.
+        /// Returns true if successful or false if not.
+        /// </summary>
+        private async Task<bool> SaveDatabaseNameAsync(DatabaseName databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            if (databaseName == null)
+                throw new ArgumentNullException(nameof(databaseName));
+
+            if (String.IsNullOrEmpty(databaseName.Name))
+            {
+                return false;
+            }
+
+            try
+            {
+                var dbNames = await LoadDatabaseNamesAsync(clusterName, true, cancellationToken).ConfigureAwait(false);
+                
+                bool nameAdded = false;
+                if (dbNames != null)
+                {
+                    var set = new SortedSet<DatabaseName>(dbNames, DatabaseNameComparer.Instance);
+                    nameAdded = set.Add(databaseName);
+                    dbNames = set.ToArray();
+                }
+                else
+                {
+                    dbNames = new[] { databaseName };
+                    nameAdded = true;
+                }
+
+                if (nameAdded)
+                {
+                    await SaveDatabaseNamesAsync(dbNames, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
+                }
+
+                return true;
+            }
+            catch (Exception) when (!throwOnError)
+            {
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Loads the corresponding database's schema and returns a new <see cref="DatabaseSymbol"/> initialized from it.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// </summary>
         public override async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
@@ -66,7 +179,8 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
-        /// Saves the database schema to the cache.
+        /// Saves the database schema to the cache for the specified cluster.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// </summary>
         public async Task<bool> SaveDatabaseAsync(DatabaseSymbol database, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
@@ -94,7 +208,7 @@ namespace Kusto.Toolkit
 
                     await File.WriteAllTextAsync(databasePath, jsonText, cancellationToken).ConfigureAwait(false);
                     var dbName = new DatabaseName(database.Name, database.AlternateName);
-                    await SaveDatabaseNameAsync(clusterName, dbName, throwOnError, cancellationToken).ConfigureAwait(false);
+                    await SaveDatabaseNameAsync(dbName, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
 
                     return true;
                 }
@@ -107,7 +221,7 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
-        /// Saves all the cluster schema to the cache.
+        /// Saves all the database schemas for the cluster to the cache.
         /// </summary>
         public async Task SaveClusterAsync(ClusterSymbol cluster, CancellationToken cancellationToken = default)
         {
@@ -121,7 +235,7 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
-        /// Saves all the schema for all the clusters to the cache.
+        /// Saves all the database schemas for all the clusters to the cache.
         /// </summary>
         public async Task SaveClustersAsync(IEnumerable<ClusterSymbol> clusters, CancellationToken cancellationToken = default)
         {
@@ -189,6 +303,7 @@ namespace Kusto.Toolkit
 
         /// <summary>
         /// Deletes all cached schemas for all databases in the cluster.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// </summary>
         public bool DeleteClusterCache(string clusterName = null)
         {
@@ -213,115 +328,6 @@ namespace Kusto.Toolkit
             return true;
         }
 
-        /// <summary>
-        /// Returns the list of saved database names for the cluster.
-        /// </summary>
-        public async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName, bool throwOnError = false, CancellationToken cancellationToken = default)
-        {
-            if (clusterName == null)
-                throw new ArgumentNullException(nameof(clusterName));
-
-            var dbNamesPath = GetDatabaseNamesFilePath(clusterName);
-            if (dbNamesPath != null && File.Exists(dbNamesPath))
-            {
-                try
-                {
-                    var jsonText = await File.ReadAllTextAsync(dbNamesPath).ConfigureAwait(false);
-                    var dbNames = JsonConvert.DeserializeObject<DatabaseNameInfo[]>(jsonText);
-                    if (dbNames != null)
-                    {
-                        return dbNames.Select(info => new DatabaseName(info.Name, info.PrettyName)).ToArray();
-                    }
-                }
-                catch (Exception) when (!throwOnError)
-                {
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Saves and overwrites the entire list of database names.
-        /// Returns true if successful or false if not.
-        /// </summary>
-        public async Task<bool> SaveDatabaseNamesAsync(string clusterName, IReadOnlyList<DatabaseName> databaseNames, bool throwOnError = false, CancellationToken cancellationToken = default)
-        {
-            if (clusterName == null)
-                throw new ArgumentNullException(nameof(clusterName));
-
-            if (databaseNames == null)
-                throw new ArgumentNullException(nameof(databaseNames));
-
-            var dbNamesPath = GetDatabaseNamesFilePath(clusterName);
-            var parentDir = Path.GetDirectoryName(dbNamesPath);
-
-            try
-            {
-                if (!Directory.Exists(parentDir))
-                {
-                    Directory.CreateDirectory(parentDir);
-                }
-
-                var dbNameInfos = databaseNames.Select(dn => new DatabaseNameInfo { Name = dn.Name, PrettyName = dn.PrettyName }).ToArray();
-                var jsonText = JsonConvert.SerializeObject(dbNameInfos, s_serializationSettings);
-                await File.WriteAllTextAsync(dbNamesPath, jsonText, cancellationToken).ConfigureAwait(false);
-
-                return true;
-            }
-            catch (Exception) when (!throwOnError)
-            {
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Adds the database name to the list of saved database names.
-        /// Returns true if successful or false if not.
-        /// </summary>
-        public async Task<bool> SaveDatabaseNameAsync(string clusterName, DatabaseName databaseName, bool throwOnError = false, CancellationToken cancellationToken = default)
-        {
-            if (clusterName == null)
-                throw new ArgumentNullException(nameof(clusterName));
-
-            if (databaseName == null)
-                throw new ArgumentNullException(nameof(databaseName));
-
-            if (String.IsNullOrEmpty(databaseName.Name))
-            {
-                return false;
-            }
-
-            try
-            {
-                var dbNames = await LoadDatabaseNamesAsync(clusterName, true, cancellationToken).ConfigureAwait(false);
-                bool nameAdded = false;
-                if (dbNames != null)
-                {
-                    var set = new SortedSet<DatabaseName>(dbNames, DatabaseNameComparer.Instance);
-                    nameAdded = set.Add(databaseName);
-                    dbNames = set.ToArray();
-                }
-                else
-                {
-                    dbNames = new[] { databaseName };
-                    nameAdded = true;
-                }
-                if (nameAdded)
-                {
-                    await SaveDatabaseNamesAsync(clusterName, dbNames, throwOnError, cancellationToken).ConfigureAwait(false);
-                }
-
-                return true;
-            }
-            catch (Exception) when (!throwOnError)
-            {
-            }
-
-            return false;
-        }
-
         private class DatabaseNameComparer : IComparer<DatabaseName>
         {
             private DatabaseNameComparer() { }
@@ -336,27 +342,27 @@ namespace Kusto.Toolkit
 
         /// <summary>
         /// Gets the path to the database names file.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// </summary>
-        public string GetDatabaseNamesFilePath(string clusterName)
+        public string GetDatabaseNamesPath(string clusterName = null)
         {
-            var clusterPath = GetClusterCachePath(clusterName);
-            
-            if (clusterPath != null)
-            {
-                return Path.Combine(clusterPath, "databaseNames.json");
-            }
+            clusterName = string.IsNullOrEmpty(clusterName)
+                ? _defaultClusterName
+                : GetFullHostName(clusterName, _defaultDomain);
 
-            return null;
+            var clusterPath = GetClusterCachePath(clusterName);
+            return Path.Combine(clusterPath, "databaseNames.json");
         }
 
         /// <summary>
         /// Gets path to the cluster cache directory within the schema cache directory.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// </summary>
         public string GetClusterCachePath(string clusterName = null)
         {
-            clusterName = clusterName ?? _defaultClusterName;
-            if (clusterName == null)
-                return null;
+            clusterName = string.IsNullOrEmpty(clusterName)
+                ? _defaultClusterName
+                : GetFullHostName(clusterName, _defaultDomain);
 
             var fullClusterName = GetFullHostName(clusterName, _defaultDomain);
             return Path.Combine(_schemaDirectoryPath, MakeFilePathPart(fullClusterName));
@@ -364,15 +370,16 @@ namespace Kusto.Toolkit
 
         /// <summary>
         /// Gets the path to the database schema file.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// </summary>
         public string GetDatabaseCachePath(string databaseName, string clusterName = null)
         {
             if (databaseName == null)
                 throw new ArgumentNullException(nameof(databaseName));
 
-            clusterName = clusterName ?? _defaultClusterName;
-            if (clusterName == null)
-                return null;
+            clusterName = string.IsNullOrEmpty(clusterName)
+                ? _defaultClusterName
+                : GetFullHostName(clusterName, _defaultDomain);
 
             return Path.Combine(GetClusterCachePath(clusterName), MakeFilePathPart(databaseName) + ".json");
         }

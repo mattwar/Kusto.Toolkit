@@ -25,7 +25,7 @@ namespace Tests
             _clusters = clusters;
         }
 
-        public override Task<IReadOnlyList<DatabaseName>> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public override Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
             var cluster = _clusters.FirstOrDefault(c => c.Name == clusterName);
             if (cluster != null)

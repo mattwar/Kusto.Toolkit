@@ -11,7 +11,61 @@ namespace Tests
     public class ServerSymbolLoaderTests : SymbolLoaderTestBase
     {
         [TestMethod]
-        public async Task TestServerSymbolLoader_LoadDatabaseAsync()
+        public async Task TestLoadDatabaseNamesAsync_implicit_cluster()
+        {
+            using (var loader = new ServerSymbolLoader(HelpConnection))
+            {
+                var names = await loader.LoadDatabaseNamesAsync();
+                Assert.IsNotNull(names);
+                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
+            }
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseNamesAsync_explicit_cluster_short_name()
+        {
+            using (var loader = new ServerSymbolLoader(HelpConnection))
+            {
+                var names = await loader.LoadDatabaseNamesAsync("help");
+                Assert.IsNotNull(names);
+                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
+            }
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseNamesAsync_explicit_cluster_full_name()
+        {
+            using (var loader = new ServerSymbolLoader(HelpConnection))
+            {
+                var names = await loader.LoadDatabaseNamesAsync(HelpCluster);
+                Assert.IsNotNull(names);
+                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
+            }
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseNamesAsync_explicit_cluster_wrong_case()
+        {
+            using (var loader = new ServerSymbolLoader(HelpConnection))
+            {
+                var names = await loader.LoadDatabaseNamesAsync(HelpCluster.ToUpper());
+                Assert.IsNotNull(names);
+                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
+            }
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseNamesAsync_unknown_cluster()
+        {
+            using (var loader = new ServerSymbolLoader(HelpConnection))
+            {
+                var names = await loader.LoadDatabaseNamesAsync("unknown_cluster");
+                Assert.IsNull(names);
+            }
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseAsync_implicit_cluster()
         {
             using (var loader = new ServerSymbolLoader(HelpConnection))
             {
@@ -25,22 +79,36 @@ namespace Tests
         }
 
         [TestMethod]
-        public async Task TestServerSymbolLoader_LoadDatabaseAsync_BadDatabaseName()
+        public async Task TestLoadDatabaseAsync_explicit_cluster()
         {
             using (var loader = new ServerSymbolLoader(HelpConnection))
             {
-                var dbSymbol = await loader.LoadDatabaseAsync("not-a-db");
+                var dbSymbol = await loader.LoadDatabaseAsync("Samples", HelpCluster);
+                Assert.IsNotNull(dbSymbol);
+                Assert.IsTrue(dbSymbol.Members.Count > 0, "members count");
+                Assert.IsTrue(dbSymbol.Tables.Count > 0, "tables count");
+                Assert.IsTrue(dbSymbol.MaterializedViews.Count > 0, "materialized views count");
+                Assert.IsTrue(dbSymbol.Functions.Count > 0, "functions count");
+            }
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseAsync_unknown_cluster()
+        {
+            using (var loader = new ServerSymbolLoader(HelpConnection))
+            {
+                var dbSymbol = await loader.LoadDatabaseAsync("Samples", "unknown_cluster");
                 Assert.IsNull(dbSymbol);
             }
         }
 
         [TestMethod]
-        public async Task TestServerSymbolLoader_GetDatabaseNamesAsync()
+        public async Task TestLoadDatabaseAsync_unknown_database()
         {
             using (var loader = new ServerSymbolLoader(HelpConnection))
             {
-                var names = await loader.GetDatabaseNamesAsync();
-                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
+                var dbSymbol = await loader.LoadDatabaseAsync("not-a-db");
+                Assert.IsNull(dbSymbol);
             }
         }
     }

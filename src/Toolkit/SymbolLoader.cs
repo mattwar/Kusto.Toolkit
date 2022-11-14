@@ -19,19 +19,22 @@ namespace Kusto.Toolkit
         public abstract string DefaultDomain { get; }
 
         /// <summary>
-        /// Gets a list of all the database names in the specified cluster.
-        /// If no cluster is specified, the loader's default cluster is used.
+        /// Loads a list of database names for the specified cluster.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// Returns null if the cluster is not found.
         /// </summary>
-        public abstract Task<IReadOnlyList<DatabaseName>> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default);
+        public abstract Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default);
 
         /// <summary>
-        /// Creates a new <see cref="DatabaseSymbol"/> from from the corresponding database's schema.
+        /// Loads the corresponding database's schema and returns a new <see cref="DatabaseSymbol"/> initialized from it.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// Returns null if the database is not found.
         /// </summary>
         public abstract Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default);
 
         /// <summary>
         /// Adds or updates the specified database symbol with a newly loaded version and returns a new <see cref="GlobalState"/> containing it if successful.
-        /// If no cluster is specified, the loader's default cluster is used.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// </summary>
         public Task<GlobalState> AddOrUpdateDatabaseAsync(GlobalState globals, string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellation = default)
         {
@@ -40,7 +43,7 @@ namespace Kusto.Toolkit
 
         /// <summary>
         /// Adds or updates the specified database symbol with a newly loaded version and returns a new <see cref="GlobalState"/> containing it if successful.
-        /// If no cluster is specified, the loader's default cluster is used.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// Also makes the database the default database.
         /// </summary>
         public Task<GlobalState> AddOrUpdateDefaultDatabaseAsync(GlobalState globals, string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellation = default)
@@ -83,7 +86,7 @@ namespace Kusto.Toolkit
 
         /// <summary>
         /// Adds or updates a cluster symbol of the specified name with open/empty database symbols for databases it does not already contain.
-        /// If no cluster name is specified, the loader's default cluster is used.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// </summary>
         public Task<GlobalState> AddOrUpdateClusterAsync(GlobalState globals, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
@@ -92,7 +95,7 @@ namespace Kusto.Toolkit
 
         /// <summary>
         /// Adds or updates a cluster symbol of the specified name with open/empty database symbols for databases it does not already contain.
-        /// If no cluster name is specified, the loader's default cluster is used.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
         /// Also makes the cluster the default cluster in the returned globals.
         /// </summary>
         public Task<GlobalState> AddOrUpdateDefaultClusterAsync(GlobalState globals, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
@@ -109,7 +112,7 @@ namespace Kusto.Toolkit
 
             clusterName = GetFullHostName(clusterName, this.DefaultDomain);
 
-            var databaseNames = await this.GetDatabaseNamesAsync(clusterName, throwOnError).ConfigureAwait(false);
+            var databaseNames = await this.LoadDatabaseNamesAsync(clusterName, throwOnError).ConfigureAwait(false);
             if (databaseNames != null)
             {
                 var cluster = globals.GetCluster(clusterName);

@@ -19,7 +19,7 @@ Use the SymbolResolver class along with a SymbolLoader to load schema for cluste
 #### Discover databases available in a cluster
 ```csharp
 var loader = new ServerSymbolLoader(clusterConnectionString);
-var names = loader.GetDatabaseNamesAsync();
+var names = loader.LoadDatabaseNamesAsync();
 ```
 </br>
 

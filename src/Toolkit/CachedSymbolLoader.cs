@@ -7,21 +7,33 @@ namespace Kusto.Toolkit
     /// <summary>
     /// A <see cref="SymbolLoader"/> that maintains a file based cache of database schemas.
     /// </summary>
-    public class CachedServerSymbolLoader : SymbolLoader
+    public class CachedSymbolLoader : SymbolLoader
     {
         public FileSymbolLoader FileLoader { get; }
         public ServerSymbolLoader ServerLoader { get; }
         private bool _autoDispose;
 
-        public CachedServerSymbolLoader(string connection, string cachePath, string defaultDomain = null)
+        public CachedSymbolLoader(string connection, string cachePath, string defaultDomain = null)
         {
+            if (connection == null)
+                throw new ArgumentNullException(nameof(connection));
+
+            if (cachePath == null)
+                throw new ArgumentNullException(nameof(cachePath));
+
             this.ServerLoader = new ServerSymbolLoader(connection, defaultDomain);
             this.FileLoader = new FileSymbolLoader(cachePath, this.ServerLoader.DefaultCluster, defaultDomain);
             _autoDispose = true;
         }
 
-        public CachedServerSymbolLoader(ServerSymbolLoader serverLoader, FileSymbolLoader fileLoader, bool autoDispose = true)
+        public CachedSymbolLoader(ServerSymbolLoader serverLoader, FileSymbolLoader fileLoader, bool autoDispose = true)
         {
+            if (serverLoader == null)
+                throw new ArgumentNullException(nameof(serverLoader));
+
+            if (fileLoader == null)
+                throw new ArgumentNullException(nameof(fileLoader));
+
             this.ServerLoader = serverLoader;
             this.FileLoader = fileLoader;
             _autoDispose = autoDispose;
@@ -39,23 +51,33 @@ namespace Kusto.Toolkit
             }
         }
 
-        public override async Task<IReadOnlyList<DatabaseName>> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Loads a list of database names for the specified cluster.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// Returns null if the cluster is not found.
+        /// </summary>
+        public override async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
-            var names = await this.FileLoader.GetDatabaseNamesAsync(clusterName, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var dbNames = await this.FileLoader.LoadDatabaseNamesAsync(clusterName, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-            if (names == null)
+            if (dbNames == null)
             {
-                names = await this.ServerLoader.GetDatabaseNamesAsync(clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
+                dbNames = await this.ServerLoader.LoadDatabaseNamesAsync(clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
 
-                if (names != null)
+                if (dbNames != null)
                 {
-                    await this.FileLoader.SaveDatabaseNamesAsync(clusterName, names, throwOnError, cancellationToken).ConfigureAwait(false);
+                    await this.FileLoader.SaveDatabaseNamesAsync(dbNames, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
                 }
             }
 
-            return names;
+            return dbNames;
         }
 
+        /// <summary>
+        /// Loads the corresponding database's schema and returns a new <see cref="DatabaseSymbol"/> initialized from it.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// Returns null if the database is not found.
+        /// </summary>
         public override async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
             var db = await this.FileLoader.LoadDatabaseAsync(databaseName, clusterName, false, cancellationToken).ConfigureAwait(false);

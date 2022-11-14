@@ -96,9 +96,11 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
-        /// Gets a list of all the database names in the cluster associated with the connection.
+        /// Loads a list of database names for the specified cluster.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// Returns null if the cluster is not found.
         /// </summary>
-        public override async Task<IReadOnlyList<DatabaseName>> GetDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public override async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
             clusterName = string.IsNullOrEmpty(clusterName)
                 ? _defaultClusterName
@@ -113,10 +115,7 @@ namespace Kusto.Toolkit
                 throwOnError, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (databases == null)
-                return null;
-
-            return databases.Select(d => new DatabaseName(d.DatabaseName, d.PrettyName)).ToArray();
+            return databases?.Select(d => new DatabaseName(d.DatabaseName, d.PrettyName)).ToArray();
         }
 
         private bool IsBadDatabaseName(string clusterName, string databaseName)
@@ -137,7 +136,9 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
-        /// Loads the schema for the specified database into a <see cref="DatabaseSymbol"/>.
+        /// Loads the corresponding database's schema and returns a new <see cref="DatabaseSymbol"/> initialized from it.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// Returns null if the database is not found.
         /// </summary>
         public override async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
@@ -157,12 +158,12 @@ namespace Kusto.Toolkit
 
             // get database name & pretty name from .show databases
             var dbNameLiteral = KustoFacts.GetStringLiteral(databaseName);
-            var dbInfo = (await ExecuteControlCommandAsync<ShowDatabasesResult>(
+            var dbInfos = await ExecuteControlCommandAsync<ShowDatabasesResult>(
                 provider, database: "",
                 $".show databases | where DatabaseName == {dbNameLiteral} or PrettyName == {dbNameLiteral}",
-                throwOnError, cancellationToken))
-                .FirstOrDefault();
+                throwOnError, cancellationToken);
 
+            var dbInfo = dbInfos?.FirstOrDefault();
             if (dbInfo == null)
             {
                 AddBadDatabasename(clusterName, databaseName);
