@@ -1,5 +1,8 @@
-# Kushy
+# Kusto.Toolkit
 Tools for building Kusto query analyzers.
+
+This project is published at: 
+https://www.nuget.org/packages/Kusto.Toolkit/
 
 This project depends on:
 1. Microsoft.Azure.Kusto.Language      -- Kusto parser and intellisense APIs
@@ -11,10 +14,11 @@ Use the SymbolLoader family of classes to feed the Kusto parser with database sc
 
 1. ServerSymbolLoader -- loads symbols from a Kusto server using admin commands.
 2. FileSymbolLoader -- loads and saves symbols into a file based symbol store.
-3. CachedServerSymbolLoader -- loads symbols from file based cache or kusto server when not found locally.
+3. CachedSymbolLoader -- loads symbols from file based cache or kusto server when not found locally.
 
 ## SymbolResolver
 Use the SymbolResolver class along with a SymbolLoader to load schema for cluster/database references in queries.
+
 
 #### Discover databases available in a cluster
 ```csharp
