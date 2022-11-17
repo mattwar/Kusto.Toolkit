@@ -79,7 +79,7 @@ var updatedGlobals = updatedScript.Globals;
 
 #### Use a cached symbol loader to speed up repeated symbol loading
 ```csharp
-var loader = new CachedServerSymbolLoader(clusterConnectionString, schemaCacheDirectoryPath);
+var loader = new CachedSymbolLoader(clusterConnectionString, schemaCacheDirectoryPath);
 var db = await loader.LoadDatabaseAsync(dbName);
 ```
 <br/>
