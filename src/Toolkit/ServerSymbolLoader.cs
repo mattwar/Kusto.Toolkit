@@ -321,10 +321,18 @@ namespace Kusto.Toolkit
             try
             {
                 var resultReader = await provider.ExecuteControlCommandAsync(database, command).ConfigureAwait(false);
+                
                 var results = KustoDataReaderParser.ParseV1(resultReader, null);
-                var tableReader = results[WellKnownDataSet.PrimaryResult].Single().TableData.CreateDataReader();
-                var objectReader = new ObjectReader<T>(tableReader);
-                return objectReader.ToArray();
+                
+                var primaryResults = results.GetMainResultsOrNull();
+                if (primaryResults != null)
+                {
+                    var tableReader = primaryResults.TableData.CreateDataReader();
+                    var objectReader = new ObjectReader<T>(tableReader);
+                    return objectReader.ToArray();
+                }
+
+                return null;
             }
             catch (Exception) when (!throwOnError)
             {

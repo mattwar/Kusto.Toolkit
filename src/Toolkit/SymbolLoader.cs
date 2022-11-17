@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics.Metrics;
 using Kusto.Language;
 using Kusto.Language.Symbols;
 
