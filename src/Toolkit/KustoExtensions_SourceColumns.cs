@@ -36,6 +36,23 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
+        /// Returns the a map between the query's result columns and the set of database table columns that contributed to them.
+        /// </summary>
+        public static IReadOnlyDictionary<ColumnSymbol, IReadOnlyList<ColumnSymbol>> GetSourceColumnMap(this KustoCode code)
+        {
+            return GetSourceColumnMap(code, GetResultColumns(code));
+        }
+
+        /// <summary>
+        /// Returns the a map between specified result columns and the set of database table columns that contributed to them.
+        /// </summary>
+        private static IReadOnlyDictionary<ColumnSymbol, IReadOnlyList<ColumnSymbol>> GetSourceColumnMap(
+            this KustoCode code, IReadOnlyList<ColumnSymbol> columns)
+        {
+            return GetSourceColumnMap(code.Syntax, code.Globals, columns);
+        }
+
+        /// <summary>
         /// Returns the set of database table columns that contributed to the data contained in the specified columns.
         /// </summary>
         private static IReadOnlyList<ColumnSymbol> GetSourceColumns(
@@ -48,39 +65,66 @@ namespace Kusto.Toolkit
 
             foreach (var c in columns)
             {
-                GatherSourceColumns(c);
+                GatherSourceColumns(c, globals, symbolToSourceMap, columnSet, columnList);
             }
 
             return columnList;
+        }
 
-            void GatherSourceColumns(Symbol symbol)
+        /// <summary>
+        /// Returns the a map between specified result columns and the set of database table columns that contributed to them.
+        /// </summary>
+        private static IReadOnlyDictionary<ColumnSymbol, IReadOnlyList<ColumnSymbol>> GetSourceColumnMap(
+            SyntaxNode root, GlobalState globals, IReadOnlyList<ColumnSymbol> columns)
+        {
+            var symbolToSourceMap = GetSymbolSources(root, globals);
+
+            var columnMap = new Dictionary<ColumnSymbol, IReadOnlyList<ColumnSymbol>>();
+            var columnSet = new HashSet<ColumnSymbol>();
+            var columnList = new List<ColumnSymbol>();
+
+            foreach (var c in columns)
             {
-                if (symbol is ColumnSymbol col)
+                columnSet.Clear();
+                columnList.Clear();
+
+                GatherSourceColumns(c, globals, symbolToSourceMap, columnSet, columnList);
+
+                columnMap.Add(c, columnList.ToReadOnly());
+            }
+
+            return columnMap;
+        }
+
+        /// <summary>
+        /// Returns the set of database table columns that contributed to the data contained in the specified columns.
+        /// </summary>
+        private static void GatherSourceColumns(
+            ColumnSymbol column,
+            GlobalState globals,
+            IReadOnlyDictionary<Symbol, Expression> symbolToSourceMap,
+            HashSet<ColumnSymbol> columnSet,
+            List<ColumnSymbol> columnList)
+        {
+            if (globals.GetTable(column) != null)
+            {
+                if (columnSet.Add(column))
+                    columnList.Add(column);
+            }
+            else if (column.OriginalColumns.Count > 0)
+            {
+                foreach (var oc in column.OriginalColumns)
                 {
-                    if (globals.GetTable(col) != null)
-                    {
-                        if (columnSet.Add(col))
-                            columnList.Add(col);
-                        return;
-                    }
-                    else if (col.OriginalColumns.Count > 0)
-                    {
-                        foreach (var oc in col.OriginalColumns)
-                        {
-                            GatherSourceColumns(oc);
-                        }
-                        return;
-                    }
+                    GatherSourceColumns(oc, globals, symbolToSourceMap, columnSet, columnList);
                 }
-                
-                if (symbolToSourceMap.TryGetValue(symbol, out var source))
+            }
+            else if (symbolToSourceMap.TryGetValue(column, out var source))
+            {
+                var inputColumns = GetSourceColumns(source, globals, symbolToSourceMap);
+                foreach (var ic in inputColumns)
                 {
-                    var inputColumns = GetSourceColumns(source, globals, symbolToSourceMap);
-                    foreach (var ic in inputColumns)
-                    {
-                        if (columnSet.Add(ic))
-                            columnList.Add(ic);
-                    }
+                    if (columnSet.Add(ic))
+                        columnList.Add(ic);
                 }
             }
         }
@@ -176,7 +220,7 @@ namespace Kusto.Toolkit
         /// Returns the source expression that computes the symbol first introduced at the origin.
         /// examples:
         ///    if the origin is the name of a let variable declaration, the source is the let statement's expression.
-        ///    if the origin is a projection operator, the source is the projection expression that computes it.
+        ///    if the origin is a projection-like operator, the source is the projection expression that computes it.
         ///    if the origin is a function call, the source may be the entire function call or one of its arguments.
         /// </summary>
         private static Expression GetSourceFromOrigin(SyntaxNode origin, Symbol symbol)
