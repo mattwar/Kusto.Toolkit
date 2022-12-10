@@ -143,7 +143,7 @@ namespace Kusto.Toolkit
         /// <summary>
         /// Returns a list of all columns referenced or declared in the sub-tree.
         /// </summary>
-        private static IReadOnlyList<ColumnSymbol> GetColumnsReferenced(SyntaxNode node)
+        public static IReadOnlyList<ColumnSymbol> GetColumnsReferenced(SyntaxNode node)
         {
             var columnSet = new HashSet<ColumnSymbol>();
             var columnList = new List<ColumnSymbol>();

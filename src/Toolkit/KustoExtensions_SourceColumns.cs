@@ -20,7 +20,7 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
-        /// Returns the set of database table columns that contributed to the data contained in the specified columns.
+        /// Returns the set of database table columns that contributed to the data contained in the specified column.
         /// </summary>
         public static IReadOnlyList<ColumnSymbol> GetSourceColumns(this KustoCode code, ColumnSymbol column)
         {
@@ -41,7 +41,7 @@ namespace Kusto.Toolkit
         private static IReadOnlyList<ColumnSymbol> GetSourceColumns(
             SyntaxNode root, GlobalState globals, IReadOnlyList<ColumnSymbol> columns)
         {
-            var columnToOriginMap = GetSymbolOrigins(root, globals);
+            var symbolToSourceMap = GetSymbolSources(root, globals);
 
             var columnSet = new HashSet<ColumnSymbol>();
             var columnList = new List<ColumnSymbol>();
@@ -53,33 +53,123 @@ namespace Kusto.Toolkit
 
             return columnList;
 
-            void GatherSourceColumns(ColumnSymbol col)
+            void GatherSourceColumns(Symbol symbol)
             {
-                if (globals.GetTable(col) != null)
+                if (symbol is ColumnSymbol col)
                 {
-                    if (columnSet.Add(col))
-                        columnList.Add(col);
-                }
-                else if (col.OriginalColumns.Count > 0)
-                {
-                    foreach (var oc in col.OriginalColumns)
+                    if (globals.GetTable(col) != null)
                     {
-                        GatherSourceColumns(oc);
+                        if (columnSet.Add(col))
+                            columnList.Add(col);
+                        return;
+                    }
+                    else if (col.OriginalColumns.Count > 0)
+                    {
+                        foreach (var oc in col.OriginalColumns)
+                        {
+                            GatherSourceColumns(oc);
+                        }
+                        return;
                     }
                 }
-                else if (columnToOriginMap.TryGetValue(col, out var origin))
+                
+                if (symbolToSourceMap.TryGetValue(symbol, out var source))
                 {
-                    var source = GetSourceFromOrigin(origin, col);
-                    if (source != null)
+                    var inputColumns = GetSourceColumns(source, globals, symbolToSourceMap);
+                    foreach (var ic in inputColumns)
                     {
-                        var colRefs = GetColumnsReferenced(source);
-                        foreach (var cr in colRefs)
-                        {
-                            GatherSourceColumns(cr);
-                        }
+                        if (columnSet.Add(ic))
+                            columnList.Add(ic);
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Returns the list of database table columns that the contributed to the expression result.
+        /// </summary>
+        private static IReadOnlyList<ColumnSymbol> GetSourceColumns(Expression expr, GlobalState globals, IReadOnlyDictionary<Symbol, Expression> symbolToSourceMap)
+        {
+            var columnSet = new HashSet<ColumnSymbol>();
+            var columnList = new List<ColumnSymbol>();
+
+            GatherSourceColumns(expr);
+
+            return columnList;
+
+            void GatherSourceColumns(SyntaxNode node)
+            {
+                SyntaxElement.WalkNodes(node,
+                    fnBefore: n =>
+                    {
+                        if (n is Expression e)
+                        {
+                            if (e.ReferencedSymbol is ColumnSymbol column)
+                            {
+                                if (globals.GetTable(column) != null)
+                                {
+                                    if (columnSet.Add(column))
+                                        columnList.Add(column);
+                                    return;
+                                }
+                                else if (column.OriginalColumns.Count > 0)
+                                {
+                                    foreach (var oc in column.OriginalColumns)
+                                    {
+                                        if (globals.GetTable(oc) != null)
+                                        {
+                                            if (columnSet.Add(oc))
+                                                columnList.Add(oc);
+                                        }
+                                        else if (symbolToSourceMap.TryGetValue(oc, out var ocSource))
+                                        {
+                                            GatherSourceColumns(ocSource);
+                                        }
+                                    }
+                                }
+                                else if (symbolToSourceMap.TryGetValue(column, out var colSource))
+                                {
+                                    GatherSourceColumns(colSource);
+                                }
+                            }
+                            else if (e.ReferencedSymbol is VariableSymbol variable)
+                            {
+                                if (symbolToSourceMap.TryGetValue(variable, out var varSource))
+                                {
+                                    GatherSourceColumns(varSource);
+                                }
+                            }
+                            else if (e.GetCalledFunctionBody() is SyntaxNode body)
+                            {
+                                GatherSourceColumns(body);
+                            }
+                        }
+                    },
+                    fnDescend: n => !(n is FunctionDeclaration)
+                    );
+            }
+        }
+
+        /// <summary>
+        /// Returns a map between the symbols declared in the syntax and their source expressions.
+        /// </summary>
+        private static IReadOnlyDictionary<Symbol, Expression> GetSymbolSources(SyntaxNode root, GlobalState globals)
+        {
+            var sources = new Dictionary<Symbol, Expression>();
+            var origins = GetSymbolOrigins(root, globals);
+
+            foreach (var pair in origins)
+            {
+                var symbol = pair.Key;
+                var origin = pair.Value;
+                var source = GetSourceFromOrigin(origin, symbol);
+                if (source != null)
+                {
+                    sources.Add(symbol, source);
+                }
+            }
+
+            return sources;
         }
 
         /// <summary>
@@ -245,16 +335,35 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
-        /// Returns a map between symbols and the origin node for each symbol declared or introduced by the syntax.
+        /// Returns true if the symbol is an external entity defined within the global state.
+        /// </summary>
+        private static bool IsExternalEntity(GlobalState globals, Symbol symbol)
+        {
+            switch (symbol)
+            {
+                case ColumnSymbol col:
+                    return globals.GetTable(col) != null;
+                case TableSymbol _:
+                case FunctionSymbol _:
+                    return globals.GetDatabase(symbol) != null;
+                case DatabaseSymbol _:
+                case ClusterSymbol _:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns a map between symbols and the origin node for each symbol declared or introduced by the syntax tree.
         /// </summary>
         private static IReadOnlyDictionary<Symbol, SyntaxNode> GetSymbolOrigins(
             SyntaxNode root, GlobalState globals)
         {
             var symbolToOriginMap = new Dictionary<Symbol, SyntaxNode>();
-            var bodyToCallSiteMap = new Dictionary<SyntaxNode, SyntaxNode>();
+            FunctionCallExpression callsite = null;
 
             GatherOrigins(root);
-
             return symbolToOriginMap;
 
             void GatherOrigins(SyntaxNode node)
@@ -262,15 +371,25 @@ namespace Kusto.Toolkit
                 SyntaxElement.WalkNodes(node,
                     fnBefore: n =>
                     {
-                        if (n is NameDeclaration
-                            && n.ReferencedSymbol is ColumnSymbol c
-                            && globals.GetTable(c) == null)
-                        {
-                            symbolToOriginMap[c] = n;
-                        }
-
                         if (n is Expression e)
                         {
+                            // any symbol defined by a name declaration
+                            if (e is NameDeclaration nd
+                                && nd.ReferencedSymbol is Symbol symbol
+                                && !IsExternalEntity(globals, symbol))
+                            {
+                                SetOrigin(symbol, nd);
+                            }
+
+                            if (n.GetCalledFunctionBody() is SyntaxNode body)
+                            {
+                                var old_callsite = callsite;
+                                callsite = n as FunctionCallExpression;
+                                GatherOrigins(body);
+                                callsite = old_callsite;
+                            }
+
+                            // tabular and tuple results may be introducing new columns
                             if (e.ResultType is TableSymbol tb
                                 && globals.GetDatabase(tb) == null)
                             {
@@ -286,11 +405,20 @@ namespace Kusto.Toolkit
                                     SetOrigin(col, e);
                                 }
                             }
-
-                            if (n.GetCalledFunctionBody() is SyntaxNode body)
+                            
+                            // variables not directly declared may be referring to function parameters
+                            if (e.ReferencedSymbol is VariableSymbol vs
+                                && !symbolToOriginMap.ContainsKey(vs)
+                                && callsite != null
+                                && callsite.ReferencedSignature is Signature sig
+                                && sig.GetParameter(vs.Name) is Parameter prm)
                             {
-                                bodyToCallSiteMap[body] = n;
-                                GatherOrigins(body);
+                                var index = sig.Parameters.IndexOf(prm);
+                                if (index >= 0 && index < sig.Parameters.Count)
+                                {
+                                    var arg = callsite.ArgumentList.Expressions[index].Element;
+                                    SetOrigin(vs, arg);
+                                }
                             }
                         }
                     },
@@ -302,8 +430,8 @@ namespace Kusto.Toolkit
 
             void SetOrigin(Symbol symbol, SyntaxNode node)
             {
-                // known database table columns do not have origins in source
-                if (symbol is ColumnSymbol col && globals.GetTable(col) != null)
+                // external symbols do not have origins in source
+                if (IsExternalEntity(globals, symbol))
                     return;
 
                 if (symbolToOriginMap.TryGetValue(symbol, out var currentOrigin))
@@ -319,20 +447,13 @@ namespace Kusto.Toolkit
                         return;
                     }
 
-                    // try to find comparable location in the same tree.
-                    while (!currentOrigin.Root.IsAncestorOf(node)
-                        && bodyToCallSiteMap.TryGetValue(node, out var callsite))
-                    {
-                        node = callsite;
-                    }
-
-                    // if both origins are in same tree, then take the earlier node.
+                    // if both origins are in same tree, then take the better origin.
                     if (currentOrigin.Root.IsAncestorOf(node))
                     {
-                        var earlier = GetBetterOrigin(currentOrigin, node);
-                        if (earlier != currentOrigin)
+                        var better = GetBetterOrigin(currentOrigin, node);
+                        if (better != currentOrigin)
                         {
-                            symbolToOriginMap[symbol] = earlier;
+                            symbolToOriginMap[symbol] = better;
                         }
                     }
                 }
@@ -357,11 +478,11 @@ namespace Kusto.Toolkit
                 if (b is NameDeclaration)
                     return b;
 
-                // a occurs before b
+                // a occurs entirely before b
                 if (a.End <= b.TextStart)
                     return a;
 
-                // b occurs before a
+                // b occurs entirely before a
                 if (b.End <= a.TextStart)
                     return b;
 
