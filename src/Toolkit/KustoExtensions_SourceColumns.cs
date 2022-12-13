@@ -12,7 +12,7 @@ namespace Kusto.Toolkit
     public static partial class KustoExtensions
     {
         /// <summary>
-        /// Returns the set of database table columns that contributed to the data contained in the specified columns.
+        /// Returns the set of database table columns that contributed to the data contained in the result columns.
         /// </summary>
         public static IReadOnlyList<ColumnSymbol> GetSourceColumns(this KustoCode code)
         {
@@ -53,7 +53,7 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
-        /// Returns the set of database table columns that contributed to the data contained in the specified columns.
+        /// Returns the a map between the specified columns and the set of database table columns that contributed to them.
         /// </summary>
         private static IReadOnlyList<ColumnSymbol> GetSourceColumns(
             SyntaxNode root, GlobalState globals, IReadOnlyList<ColumnSymbol> columns)
