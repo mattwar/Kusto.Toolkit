@@ -33,8 +33,7 @@ result may contain computed columns.
 
 ```csharp
 var code = KustoCode.ParseAndAnalyze("TableA | where X > Y | project A, B, V=C*D", globals);
-var projectNode = code.GetFirstDescendant<ProjectOperator>();
-var columns = KustoExtensions.GetDatabaseTablesReferenced(projectNode, code.Globals);
+var columns = code.GetDatabaseTablesColumnsInResult();
 // columns: A, B
 ```
 <br/>
