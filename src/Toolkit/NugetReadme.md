@@ -11,12 +11,12 @@ This project depends on:
 ## SymbolLoader
 Use the SymbolLoader family of classes to feed the Kusto parser with database schemas directly from your cluster.
 
-1. ServerSymbolLoader -- loads symbols from a Kusto server using admin commands.
-2. FileSymbolLoader -- loads and saves symbols into a file based symbol store.
-3. CachedServerSymbolLoader -- loads symbols from file based cache or kusto server when not found locally.
-
 ## SymbolResolver
 Use the SymbolResolver class along with a SymbolLoader to load schema for cluster/database references in queries.
+
+## KustoExtensions
+Use extension methods found in the `KustoExtensions` class like `GetDatabaseTablesReferenced` and `GetDatabaseTableColumnsReferenced` to help you determine 
+which tables and columns are used in a query, or use `GetSourceColumns` to determine which database table columns contributed to the content of any result columns.
 
 
 ## Access the source code, contribute or just ask questions:
