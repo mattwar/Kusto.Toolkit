@@ -1,4 +1,4 @@
-﻿# SymbolResolver
+# SymbolResolver
 Use the `SymbolResolver` class along with a `SymbolLoader` to load additional schema symbols 
 for databases that are referenced using the `database()` function.
 
@@ -16,7 +16,6 @@ var code = KustoCode.ParseAndAnalyze(query, globals);
 var resolver = new SymbolResolver(loader);
 var updatedCode = await resolver.AddReferencedDatabasesAsync(code);
 ```
-<br/>
 
 #### Update CodeScript database references
 ```csharp
@@ -32,5 +31,5 @@ var script = CodeScript.From(query, globals);
 var resolver = new SymbolResolver(loader);
 var updatedScript = await resolver.AddReferencedDatabasesAsync(script);
 ```
-<br/>
+
 
