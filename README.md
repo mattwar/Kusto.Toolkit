@@ -15,7 +15,6 @@ Use the SymbolLoader family of classes to feed the Kusto parser with database sc
 1. ServerSymbolLoader -- loads symbols from a Kusto server using admin commands.
 2. FileSymbolLoader -- loads and saves symbols into a file based symbol store.
 3. CachedSymbolLoader -- loads symbols from file based cache or kusto server when not found locally.
-<br/>
 
 ## [SymbolResolver](src/Toolkit/docs/SymbolResolver.md)
 Use the SymbolResolver class along with a SymbolLoader to load schema for cluster/database references in queries.
