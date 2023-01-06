@@ -96,14 +96,15 @@ var columns = code.GetSourceColumnMap(resultColumns);
 
 ## Not extensions, but still useful
 
-### GetDatabaseTableColumns(SyntaxNode root, GlobalState globals)
+### GetDatabaseTableColumnsReferenced(SyntaxNode root, GlobalState globals)
 This is a non-extension version of `GeDatabaseTableColumns()` that you can use to 
 discover the columns referenced in a sub-tree of the entire query.  
 
 ```csharp
 var code = KustoCode.ParseAndAnalyze("TableA | where X > Y | project A, B, C", globals);
+// only get database table columns referenced in the project operator 
 var projectNode = code.GetFirstDescendant<ProjectOperator>();
-var columns = KustoExtensions.GetDatabaseTablesReferenced(projectNode, code.Globals);
+var columns = KustoExtensions.GetDatabaseTableColumnsReferenced(projectNode, code.Globals);
 // columns: A, B, C
 ```
 
@@ -113,8 +114,9 @@ inside any function called within the sub-tree.
 
 ```csharp
 var code = KustoCode.ParseAndAnalyze("TableA | extend YY=Y*Y | where X > YY | project A, B, C", globals);
+// only get columns referenced in the where/filter operator
 var whereNode = code.GetFirstDescendant<FilterOperator>();
-var columns = KustoExtensions.GetDatabaseTablesReferenced(projectNode, code.Globals);
+var columns = KustoExtensions.GetColumnsReferenced(projectNode);
 // columns: X, YY
 ```
 
