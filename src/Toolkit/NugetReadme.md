@@ -20,7 +20,7 @@ which tables and columns are used in a query, or use `GetSourceColumns` to deter
 
 
 ## Access the source code, contribute or just ask questions:
-https://github.com/mattwar/Kushy
+https://github.com/mattwar/Kusto.Toolkit
 
 
 
