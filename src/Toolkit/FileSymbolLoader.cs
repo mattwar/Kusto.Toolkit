@@ -52,7 +52,7 @@ namespace Kusto.Toolkit
             {
                 try
                 {
-                    var jsonText = await File.ReadAllTextAsync(dbNamesPath).ConfigureAwait(false);
+                    var jsonText = await ReadAllTextAsync(dbNamesPath, cancellationToken).ConfigureAwait(false);
                     var dbNames = JsonConvert.DeserializeObject<DatabaseNameInfo[]>(jsonText);
                     if (dbNames != null)
                     {
@@ -89,7 +89,7 @@ namespace Kusto.Toolkit
 
                 var dbNameInfos = databaseNames.Select(dn => new DatabaseNameInfo { Name = dn.Name, PrettyName = dn.PrettyName }).ToArray();
                 var jsonText = JsonConvert.SerializeObject(dbNameInfos, s_serializationSettings);
-                await File.WriteAllTextAsync(dbNamesPath, jsonText, cancellationToken).ConfigureAwait(false);
+                await WriteAllTextAsync(dbNamesPath, jsonText, cancellationToken).ConfigureAwait(false);
 
                 return true;
             }
@@ -165,7 +165,7 @@ namespace Kusto.Toolkit
                 {
                     if (File.Exists(databasePath))
                     {
-                        var jsonText = await File.ReadAllTextAsync(databasePath).ConfigureAwait(false);
+                        var jsonText = await ReadAllTextAsync(databasePath, cancellationToken).ConfigureAwait(false);
                         var dbInfo = JsonConvert.DeserializeObject<DatabaseInfo>(jsonText);
                         return CreateDatabaseSymbol(dbInfo);
                     }
@@ -206,7 +206,7 @@ namespace Kusto.Toolkit
                         Directory.CreateDirectory(clusterPath);
                     }
 
-                    await File.WriteAllTextAsync(databasePath, jsonText, cancellationToken).ConfigureAwait(false);
+                    await WriteAllTextAsync(databasePath, jsonText, cancellationToken).ConfigureAwait(false);
                     var dbName = new DatabaseName(database.Name, database.AlternateName);
                     await SaveDatabaseNameAsync(dbName, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
 
@@ -232,6 +232,30 @@ namespace Kusto.Toolkit
             {
                 var _ = await SaveDatabaseAsync(db, cluster.Name, throwOnError: false, cancellationToken: cancellationToken).ConfigureAwait(false);
             }
+        }
+
+        /// <summary>
+        /// Returns all the text read from the file asynchronously.
+        /// </summary>
+        private static Task<string> ReadAllTextAsync(string path, CancellationToken cancellationToken)
+        {
+#if NET6_0_OR_GREATER
+            return File.ReadAllTextAsync(path, cancellationToken);
+#else
+            return Task.Run(() => File.ReadAllText(path), cancellationToken);
+#endif
+        }
+
+        /// <summary>
+        /// Creates and writes the text to the file asynchronously.
+        /// </summary>
+        private static Task WriteAllTextAsync(string path, string text, CancellationToken cancellationToken)
+        {
+#if NET6_0_OR_GREATER
+            return File.WriteAllTextAsync(path, text, cancellationToken);
+#else
+            return Task.Run(() => File.WriteAllText(path, text), cancellationToken);
+#endif
         }
 
         /// <summary>

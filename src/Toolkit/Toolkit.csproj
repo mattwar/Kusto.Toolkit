@@ -2,9 +2,10 @@
 
   <PropertyGroup>
     <OutputType>Library</OutputType>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFrameworks>net6.0;net472;netstandard2.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+	<LangVersion>10.0</LangVersion>
     <AssemblyName>Kusto.Toolkit</AssemblyName>
     <RootNamespace>$(AssemblyName)</RootNamespace>
     <BaseOutputPath>bin\</BaseOutputPath>
@@ -38,16 +39,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Azure.Kusto.Data" Version="11.2.1" />
-    <PackageReference Include="Microsoft.Azure.Kusto.Language" Version="11.2.1" />
+    <PackageReference Include="Microsoft.Azure.Kusto.Data" Version="11.2.2" />
+    <PackageReference Include="Microsoft.Azure.Kusto.Language" Version="11.2.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="NugetReadme.md">
-      <Pack>True</Pack>
-      <PackagePath>\</PackagePath>
-    </None>
+    <None Include="NugetReadme.md" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>
