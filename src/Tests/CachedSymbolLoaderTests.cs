@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Kusto.Toolkit;
+using Kusto.Data;
 
 namespace Tests
 {
@@ -127,6 +128,25 @@ namespace Tests
 
                 var cachedDb = await loader.FileLoader.LoadDatabaseAsync("Samples");
                 Assert.IsNull(cachedDb);
+
+                loader.FileLoader.DeleteCache();
+            }
+        }
+
+        [TestMethod]
+        public async Task TestCreateCachedSymbolLoader_KustoConnectionStringBuilder()
+        {
+            var cachePath = GetTestCachePath();
+            var builder = new KustoConnectionStringBuilder(HelpConnection);
+
+            using (var loader = new CachedSymbolLoader(builder, cachePath))
+            {
+                var dbNamesFilePath = loader.FileLoader.GetDatabaseNamesPath();
+                Assert.IsFalse(File.Exists(dbNamesFilePath));
+
+                var dbNames = await loader.LoadDatabaseNamesAsync();
+                Assert.IsNotNull(dbNames);
+                Assert.IsTrue(File.Exists(dbNamesFilePath));
 
                 loader.FileLoader.DeleteCache();
             }

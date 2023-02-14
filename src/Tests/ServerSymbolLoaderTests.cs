@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Kusto.Data;
 using Kusto.Toolkit;
 
 namespace Tests
@@ -14,6 +15,18 @@ namespace Tests
         public async Task TestLoadDatabaseNamesAsync_implicit_cluster()
         {
             using (var loader = new ServerSymbolLoader(HelpConnection))
+            {
+                var names = await loader.LoadDatabaseNamesAsync();
+                Assert.IsNotNull(names);
+                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
+            }
+        }
+
+        [TestMethod]
+        public async Task TestCreateServerSymbolLoader_KustoConnectionStringBuilder()
+        {
+            var builder = new KustoConnectionStringBuilder(HelpConnection);
+            using (var loader = new ServerSymbolLoader(builder))
             {
                 var names = await loader.LoadDatabaseNamesAsync();
                 Assert.IsNotNull(names);

@@ -1,4 +1,5 @@
-﻿using Kusto.Language.Symbols;
+﻿using Kusto.Data;
+using Kusto.Language.Symbols;
 
 #nullable disable // some day...
 
@@ -13,19 +14,6 @@ namespace Kusto.Toolkit
         public ServerSymbolLoader ServerLoader { get; }
         private bool _autoDispose;
 
-        public CachedSymbolLoader(string connection, string cachePath, string defaultDomain = null)
-        {
-            if (connection == null)
-                throw new ArgumentNullException(nameof(connection));
-
-            if (cachePath == null)
-                throw new ArgumentNullException(nameof(cachePath));
-
-            this.ServerLoader = new ServerSymbolLoader(connection, defaultDomain);
-            this.FileLoader = new FileSymbolLoader(cachePath, this.ServerLoader.DefaultCluster, defaultDomain);
-            _autoDispose = true;
-        }
-
         public CachedSymbolLoader(ServerSymbolLoader serverLoader, FileSymbolLoader fileLoader, bool autoDispose = true)
         {
             if (serverLoader == null)
@@ -37,6 +25,32 @@ namespace Kusto.Toolkit
             this.ServerLoader = serverLoader;
             this.FileLoader = fileLoader;
             _autoDispose = autoDispose;
+        }
+
+        public CachedSymbolLoader(KustoConnectionStringBuilder connectionBuilder, string cachePath, string defaultDomain = null)
+        {
+            if (connectionBuilder == null)
+                throw new ArgumentNullException(nameof(connectionBuilder));
+
+            if (cachePath == null)
+                throw new ArgumentNullException(nameof(cachePath));
+
+            this.ServerLoader = new ServerSymbolLoader(connectionBuilder, defaultDomain);
+            this.FileLoader = new FileSymbolLoader(cachePath, this.ServerLoader.DefaultCluster, defaultDomain);
+            _autoDispose = true;
+        }
+
+        public CachedSymbolLoader(string connection, string cachePath, string defaultDomain = null)
+        {
+            if (connection == null)
+                throw new ArgumentNullException(nameof(connection));
+
+            if (cachePath == null)
+                throw new ArgumentNullException(nameof(cachePath));
+
+            this.ServerLoader = new ServerSymbolLoader(connection, defaultDomain);
+            this.FileLoader = new FileSymbolLoader(cachePath, this.ServerLoader.DefaultCluster, defaultDomain);
+            _autoDispose = true;
         }
 
         public override string DefaultCluster => this.ServerLoader.DefaultCluster;
