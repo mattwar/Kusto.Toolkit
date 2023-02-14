@@ -408,8 +408,11 @@ namespace Kusto.Toolkit
             return Path.Combine(GetClusterCachePath(clusterName), MakeFilePathPart(databaseName) + ".json");
         }
 
+        private static readonly HashSet<char> _invalidPathChars =
+            new HashSet<char>(Path.GetInvalidPathChars().Concat(Path.GetInvalidFileNameChars()));
+
         private static bool IsInvalidPathChar(char ch) =>
-            ch == '\\' || ch == '/';
+            _invalidPathChars.Contains(ch);
 
         private static string MakeFilePathPart(string name)
         {
