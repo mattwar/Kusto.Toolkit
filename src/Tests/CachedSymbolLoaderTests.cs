@@ -12,12 +12,16 @@ namespace Tests
     [TestClass]
     public class CachedSymbolLoaderTests : SymbolLoaderTestBase
     {
+        private CachedSymbolLoader CreateLoader(string cachePath = null)
+        {
+            cachePath ??= GetTestCachePath();
+            return new CachedSymbolLoader(new KustoConnectionStringBuilder(HelpConnection), cachePath);
+        }
+
         [TestMethod]
         public async Task TestLoadDatabaseNamesAsync_implicit_cluster()
         {
-            var cachePath = GetTestCachePath();
-
-            using (var loader = new CachedSymbolLoader(HelpConnection, cachePath))
+            using (var loader = CreateLoader())
             {
                 var dbNamesFilePath = loader.FileLoader.GetDatabaseNamesPath();
                 Assert.IsFalse(File.Exists(dbNamesFilePath));
@@ -33,9 +37,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseNamesAsync_explicit_cluster()
         {
-            var cachePath = GetTestCachePath();
-
-            using (var loader = new CachedSymbolLoader(HelpConnection, cachePath))
+            using (var loader = CreateLoader())
             {
                 var dbNamesFilePath = loader.FileLoader.GetDatabaseNamesPath();
                 Assert.IsFalse(File.Exists(dbNamesFilePath));
@@ -51,9 +53,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseNamesAsync_unknown_cluster()
         {
-            var cachePath = GetTestCachePath();
-
-            using (var loader = new CachedSymbolLoader(HelpConnection, cachePath))
+            using (var loader = CreateLoader())
             {
                 var dbNamesFilePath = loader.FileLoader.GetDatabaseNamesPath("unknown_cluster");
                 Assert.IsFalse(File.Exists(dbNamesFilePath));
@@ -68,9 +68,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseAsync_implicit_cluster()
         {
-            var cachePath = GetTestCachePath();
-
-            using (var loader = new CachedSymbolLoader(HelpConnection, cachePath))
+            using (var loader = CreateLoader())
             {
                 var dbCachePath = loader.FileLoader.GetDatabaseCachePath("Samples");
                 Assert.IsFalse(File.Exists(dbCachePath), "database cache does not exist before load request");
@@ -91,9 +89,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseAsync_explicit_cluster()
         {
-            var cachePath = GetTestCachePath();
-
-            using (var loader = new CachedSymbolLoader(HelpConnection, cachePath))
+            using (var loader = CreateLoader())
             {
                 var dbCachePath = loader.FileLoader.GetDatabaseCachePath("Samples");
                 Assert.IsFalse(File.Exists(dbCachePath), "database cache does not exist before load request");
@@ -116,7 +112,7 @@ namespace Tests
         {
             var cachePath = GetTestCachePath();
 
-            using (var loader = new CachedSymbolLoader(HelpConnection, cachePath))
+            using (var loader = CreateLoader())
             {
                 var dbCachePath = loader.FileLoader.GetDatabaseCachePath("Samples", "unknown_cluster");
                 Assert.IsFalse(File.Exists(dbCachePath));
@@ -128,25 +124,6 @@ namespace Tests
 
                 var cachedDb = await loader.FileLoader.LoadDatabaseAsync("Samples");
                 Assert.IsNull(cachedDb);
-
-                loader.FileLoader.DeleteCache();
-            }
-        }
-
-        [TestMethod]
-        public async Task TestCreateCachedSymbolLoader_KustoConnectionStringBuilder()
-        {
-            var cachePath = GetTestCachePath();
-            var builder = new KustoConnectionStringBuilder(HelpConnection);
-
-            using (var loader = new CachedSymbolLoader(builder, cachePath))
-            {
-                var dbNamesFilePath = loader.FileLoader.GetDatabaseNamesPath();
-                Assert.IsFalse(File.Exists(dbNamesFilePath));
-
-                var dbNames = await loader.LoadDatabaseNamesAsync();
-                Assert.IsNotNull(dbNames);
-                Assert.IsTrue(File.Exists(dbNamesFilePath));
 
                 loader.FileLoader.DeleteCache();
             }

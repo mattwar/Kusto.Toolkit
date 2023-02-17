@@ -11,22 +11,15 @@ namespace Tests
     [TestClass]
     public class ServerSymbolLoaderTests : SymbolLoaderTestBase
     {
-        [TestMethod]
-        public async Task TestLoadDatabaseNamesAsync_implicit_cluster()
+        private ServerSymbolLoader CreateLoader()
         {
-            using (var loader = new ServerSymbolLoader(HelpConnection))
-            {
-                var names = await loader.LoadDatabaseNamesAsync();
-                Assert.IsNotNull(names);
-                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
-            }
+            return new ServerSymbolLoader(new KustoConnectionStringBuilder(HelpConnection));
         }
 
         [TestMethod]
-        public async Task TestCreateServerSymbolLoader_KustoConnectionStringBuilder()
+        public async Task TestLoadDatabaseNamesAsync_implicit_cluster()
         {
-            var builder = new KustoConnectionStringBuilder(HelpConnection);
-            using (var loader = new ServerSymbolLoader(builder))
+            using (var loader = CreateLoader())
             {
                 var names = await loader.LoadDatabaseNamesAsync();
                 Assert.IsNotNull(names);
@@ -37,7 +30,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseNamesAsync_explicit_cluster_short_name()
         {
-            using (var loader = new ServerSymbolLoader(HelpConnection))
+            using (var loader = CreateLoader())
             {
                 var names = await loader.LoadDatabaseNamesAsync("help");
                 Assert.IsNotNull(names);
@@ -48,7 +41,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseNamesAsync_explicit_cluster_full_name()
         {
-            using (var loader = new ServerSymbolLoader(HelpConnection))
+            using (var loader = CreateLoader())
             {
                 var names = await loader.LoadDatabaseNamesAsync(HelpCluster);
                 Assert.IsNotNull(names);
@@ -59,7 +52,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseNamesAsync_explicit_cluster_wrong_case()
         {
-            using (var loader = new ServerSymbolLoader(HelpConnection))
+            using (var loader = CreateLoader())
             {
                 var names = await loader.LoadDatabaseNamesAsync(HelpCluster.ToUpper());
                 Assert.IsNotNull(names);
@@ -70,7 +63,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseNamesAsync_unknown_cluster()
         {
-            using (var loader = new ServerSymbolLoader(HelpConnection))
+            using (var loader = CreateLoader())
             {
                 var names = await loader.LoadDatabaseNamesAsync("unknown_cluster");
                 Assert.IsNull(names);
@@ -80,7 +73,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseAsync_implicit_cluster()
         {
-            using (var loader = new ServerSymbolLoader(HelpConnection))
+            using (var loader = CreateLoader())
             {
                 var dbSymbol = await loader.LoadDatabaseAsync("Samples");
                 Assert.IsNotNull(dbSymbol);
@@ -94,7 +87,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseAsync_explicit_cluster()
         {
-            using (var loader = new ServerSymbolLoader(HelpConnection))
+            using (var loader = CreateLoader())
             {
                 var dbSymbol = await loader.LoadDatabaseAsync("Samples", HelpCluster);
                 Assert.IsNotNull(dbSymbol);
@@ -108,7 +101,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseAsync_unknown_cluster()
         {
-            using (var loader = new ServerSymbolLoader(HelpConnection))
+            using (var loader = CreateLoader())
             {
                 var dbSymbol = await loader.LoadDatabaseAsync("Samples", "unknown_cluster");
                 Assert.IsNull(dbSymbol);
@@ -118,7 +111,7 @@ namespace Tests
         [TestMethod]
         public async Task TestLoadDatabaseAsync_unknown_database()
         {
-            using (var loader = new ServerSymbolLoader(HelpConnection))
+            using (var loader = CreateLoader())
             {
                 var dbSymbol = await loader.LoadDatabaseAsync("not-a-db");
                 Assert.IsNull(dbSymbol);

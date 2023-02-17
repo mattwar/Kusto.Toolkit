@@ -1,4 +1,4 @@
-# SymbolLoader
+## SymbolLoader
 Use the SymbolLoader family of classes to feed the Kusto parser with database schemas directly from your cluster.
 
 ### ServerSymbolLoader
@@ -6,20 +6,21 @@ The `ServerSymbolLoader` class loads symbols from a Kusto server using admin com
 
 #### Discover databases available in a cluster
 ```csharp
-var loader = new ServerSymbolLoader(clusterConnectionString);
+var connection = new KustoConnectionStringBuilder(...);
+var loader = new ServerSymbolLoader(connection);
 var names = loader.LoadDatabaseNamesAsync();
 ```
 
 #### Load database schema into a symbol
 ```csharp
-var loader = new ServerSymbolLoader(clusterConnectionString);
+var loader = new ServerSymbolLoader(connection);
 var db = await loader.LoadDatabaseAsync(dbName);
 ```
 
 #### Load database schema into a GlobalState and set it as the default database
 ```csharp
 var globals = GlobalState.Default;
-var loader = new ServerSymbolLoader(clusterConnectionString);
+var loader = new ServerSymbolLoader(connection);
 var globalsWithDB = await loader.AddOrUpdateDefaultDatabaseAsync(globals, dbName);
 var parsed = KustoCode.ParseAndAnalyze(query, globalsWithDB);
 ```
@@ -85,6 +86,7 @@ to make a `SymbolLoader` that loads symbols from either a file based cache or a 
 
 #### Use a cached symbol loader to speed up repeated symbol loading
 ```csharp
-var loader = new CachedSymbolLoader(clusterConnectionString, schemaCacheDirectoryPath);
+var connection = new KustoConnectionStringBuilder(...);
+var loader = new CachedSymbolLoader(connection, schemaCacheDirectoryPath);
 var db = await loader.LoadDatabaseAsync(dbName);
 ```

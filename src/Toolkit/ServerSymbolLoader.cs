@@ -5,6 +5,7 @@ using Kusto.Data.Net.Client;
 using Kusto.Language;
 using Kusto.Language.Symbols;
 using Kusto.Data.Common;
+using System.ComponentModel;
 
 #nullable disable // some day...
 
@@ -21,22 +22,7 @@ namespace Kusto.Toolkit
         private readonly string _defaultClusterName;
         private readonly string _defaultDomain;
         private readonly Dictionary<string, ICslAdminProvider> _dataSourceToAdminProviderMap = new Dictionary<string, ICslAdminProvider>();
-        private readonly HashSet<string> _ignoreClusterNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, HashSet<string>> _clusterToBadDbNameMap = new Dictionary<string, HashSet<string>>();
-
-        /// <summary>
-        /// Creates a new <see cref="SymbolLoader"/> instance. recommended method: SymbolLoader(KustoConnectionStringBuilder clusterConnection)
-        /// </summary>
-        /// <param name="clusterConnection">The cluster connection string.</param>
-        /// <param name="defaultDomain">The domain used to convert short cluster host names into full cluster host names.
-        /// This string must start with a dot.  If not specified, the default domain is ".Kusto.Windows.Net"
-        /// </param>
-        public ServerSymbolLoader(string clusterConnection, string defaultDomain = null)
-            : this(new KustoConnectionStringBuilder(clusterConnection), defaultDomain)
-        {
-            if (clusterConnection == null)
-                throw new ArgumentNullException(nameof(clusterConnection));
-        }
 
         /// <summary>
         /// Creates a new <see cref="SymbolLoader"/> instance.
@@ -55,6 +41,20 @@ namespace Kusto.Toolkit
             _defaultDomain = String.IsNullOrEmpty(defaultDomain)
                 ? KustoFacts.KustoWindowsNet
                 : defaultDomain;
+        }
+
+        /// <summary>
+        /// Creates a new <see cref="SymbolLoader"/> instance. recommended method: SymbolLoader(KustoConnectionStringBuilder clusterConnection)
+        /// </summary>
+        /// <param name="clusterConnection">The cluster connection string.</param>
+        /// <param name="defaultDomain">The domain used to convert short cluster host names into full cluster host names.
+        /// This string must start with a dot.  If not specified, the default domain is ".Kusto.Windows.Net"
+        /// </param>
+        [Obsolete("Use constructor with KustoConnectionStringBuilder for proper handling of authentication and secrets.")]
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public ServerSymbolLoader(string clusterConnection, string defaultDomain = null)
+            : this(new KustoConnectionStringBuilder(clusterConnection), defaultDomain)
+        {
         }
 
         public override string DefaultDomain => _defaultDomain;

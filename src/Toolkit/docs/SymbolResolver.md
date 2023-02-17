@@ -1,11 +1,12 @@
-# SymbolResolver
+## SymbolResolver
 Use the `SymbolResolver` class along with a `SymbolLoader` to load additional schema symbols 
 for databases that are referenced using the `database()` function.
 
 #### Update KustoCode database references
 ```csharp
 // start with default database loaded
-var loader = new ServerSymbolLoader(clusterConnectionString);
+var connection = new KustoConnectionStringBuilder(...);
+var loader = new ServerSymbolLoader(connection);
 var globals = await loader.AddOrUpdateDefaultDatabaseAsync(GlobalState.Default, "primary_db");
 
 // parse query with references to other databases (not yet loaded)
@@ -20,7 +21,8 @@ var updatedCode = await resolver.AddReferencedDatabasesAsync(code);
 #### Update CodeScript database references
 ```csharp
 // start with an initial default database loaded
-var loader = new ServerSymbolLoader(clusterConnectionString);
+var connection = new KustoConnectionStringBuilder(...);
+var loader = new ServerSymbolLoader(connection);
 var globals = await loader.AddOrUpdateDefaultDatabaseAsync(GlobalState.Default, "primary_db");
 
 // parse query with references to other databases (not yet loaded)

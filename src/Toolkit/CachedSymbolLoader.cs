@@ -1,5 +1,6 @@
 ﻿using Kusto.Data;
 using Kusto.Language.Symbols;
+using System.ComponentModel;
 
 #nullable disable // some day...
 
@@ -40,6 +41,8 @@ namespace Kusto.Toolkit
             _autoDispose = true;
         }
 
+        [Obsolete("Use constructor with KustoConnectionStringBuilder for proper handling of authentication and secrets.")]
+        [EditorBrowsable(EditorBrowsableState.Never)]
         public CachedSymbolLoader(string connection, string cachePath, string defaultDomain = null)
         {
             if (connection == null)

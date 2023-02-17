@@ -1,4 +1,4 @@
-﻿# KustoExtensions
+﻿## KustoExtensions
 
 These extension methods add additional functionality to your `KustoCode` instances.
 
