@@ -5,8 +5,6 @@ using Kusto.Language.Symbols;
 using Kusto.Language.Syntax;
 using Kusto.Language.Utils;
 
-#nullable disable // some day...
-
 namespace Kusto.Toolkit
 {
     public static partial class KustoExtensions
@@ -26,19 +24,25 @@ namespace Kusto.Toolkit
                 SyntaxElement.WalkNodes(root,
                     fnBefore: n =>
                     {
-                        if (n.ReferencedSymbol is TableSymbol t
-                            && code.Globals.IsDatabaseTable(t))
+                        if (n.ReferencedSymbol is TableSymbol ntab)
                         {
-                            if (tableSet.Add(t))
-                                tableList.Add(t);
+                            AddTable(ntab);
                         }
-
-                        if (n is Expression e
-                            && e.ResultType is TableSymbol ts
-                            && code.Globals.IsDatabaseTable(ts))
+                        else if (n.ReferencedSymbol is GroupSymbol ng)
                         {
-                            if (tableSet.Add(ts))
-                                tableList.Add(ts);
+                            AddGroupTables(ng);
+                        }
+    
+                        if (n is Expression e)
+                        {
+                            if (e.ResultType is TableSymbol ts)
+                            {
+                                AddTable(ts);
+                            }
+                            else if (e.ResultType is GroupSymbol eg)
+                            {
+                                AddGroupTables(eg);
+                            }
                         }
 
                         if (n.GetCalledFunctionBody() is SyntaxNode body)
@@ -50,6 +54,28 @@ namespace Kusto.Toolkit
                         // skip descending into function declarations since their bodies will be examined by the code above
                         !(n is FunctionDeclaration)
                     );
+            }
+
+            void AddTable(TableSymbol table)
+            {
+                if (code.Globals.IsDatabaseTable(table))
+                {
+                    if (tableSet.Add(table))
+                        tableList.Add(table);
+                }
+            }
+
+            void AddGroupTables(GroupSymbol group)
+            {
+                if (group.Members.Count > 0
+                    && group.Members[0] is TableSymbol)
+                {
+                    foreach (var member in group.Members)
+                    {
+                        if (member is TableSymbol table)
+                            AddTable(table);
+                    }
+                }
             }
         }
 

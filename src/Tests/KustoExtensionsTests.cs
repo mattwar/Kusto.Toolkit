@@ -28,6 +28,7 @@ namespace Tests
             TestGetDatabaseTables("database('db2').Tab22", "db2.Tab22", globals);
             TestGetDatabaseTables("Tab11 | union Tab12", "db1.Tab11, db1.Tab12", globals);
             TestGetDatabaseTables("Tab11 | union database('db2').Tab22", "db1.Tab11, db2.Tab22", globals);
+            TestGetDatabaseTables("union Tab*", "db1.Tab11, db1.Tab12", globals);
         }
 
         [TestMethod]
@@ -48,6 +49,7 @@ namespace Tests
             TestGetDatabaseTables("Fn_11_21", "db1.Tab11, db2.Tab21", globals);
             TestGetDatabaseTables("Fn_11_22_12", "db1.Tab11, db2.Tab22, db1.Tab12", globals);
             TestGetDatabaseTables("database('db2').Fn_21_11_22_12", "db2.Tab21, db1.Tab11, db2.Tab22, db1.Tab12", globals);
+            //TestGetDatabaseTables("union Fn_11*", "db1.Tab11, db2.Tab22, db1.Tab12", globals);
         }
 
         private static void TestGetDatabaseTables(string query, string tableNames, GlobalState globals)
