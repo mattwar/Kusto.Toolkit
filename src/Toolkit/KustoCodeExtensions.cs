@@ -7,7 +7,7 @@ using Kusto.Language.Utils;
 
 namespace Kusto.Toolkit
 {
-    public static partial class KustoExtensions
+    public static partial class KustoCodeExtensions
     {
         /// <summary>
         /// Returns a list of all the database tables that are explicitly referenced in the query.

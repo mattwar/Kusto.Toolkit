@@ -9,7 +9,7 @@ using Kusto.Language.Utils;
 
 namespace Kusto.Toolkit
 {
-    public static partial class KustoExtensions
+    public static partial class KustoCodeExtensions
     {
         /// <summary>
         /// Returns the set of database table columns that contributed to the data contained in the result columns.

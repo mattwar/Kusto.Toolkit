@@ -20,9 +20,13 @@ Use the SymbolLoader family of classes to feed the Kusto parser with database sc
 Use the SymbolResolver class along with a SymbolLoader to load schema for cluster/database references in queries.
 <br/>
 
-## [KustoExtensions](src/Toolkit/docs/Extensions.md)
-Use extension methods found in the `KustoExtensions` class like `GetDatabaseTablesReferenced` and `GetDatabaseTableColumnsReferenced` to help you determine 
+## [KustoCode Extensions](src/Toolkit/docs/KustoCodeExtensions.md)
+Use extension methods found in the `KustoCodeExtensions` class like `GetDatabaseTablesReferenced` and `GetDatabaseTableColumnsReferenced` to help you determine 
 which tables and columns are used in a query, or use `GetSourceColumns` to determine which database table columns contributed to the content of any result columns.
+
+## [GlobalState Extensions](src/Toolkit/docs/GlobalStateExtensions.md)
+Use extension methods found in the `GlobalStateExtensions` class like `AddOrUpdateDatabaseMembers` to easily add or update tables or functions in the default database,
+or used `ApplyCommand` to apply changes to schema symbols using commands.
 
 
 
