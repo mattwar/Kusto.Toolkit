@@ -1,4 +1,4 @@
-﻿## KustoExtensions
+﻿## KustoCode Extensions
 
 These extension methods add additional functionality to your `KustoCode` instances.
 
@@ -91,6 +91,7 @@ var resultColumns = code.GetResultColumns().First(c => c.Name.StartsWith("A")).T
 var columns = code.GetSourceColumnMap(resultColumns);
 // map: AB: [A, B], AC: [A, C]
 ```
+
 
 <br/>
 
