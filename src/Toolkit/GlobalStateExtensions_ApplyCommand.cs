@@ -1234,6 +1234,9 @@ namespace Tests
 
         private static SyntaxElement? GetNextPeer(SyntaxElement? element)
         {
+            if (element == null)
+                return null;
+
             var lastToken = element is SyntaxToken elementToken ? elementToken : element.GetLastToken();
             var nextToken = lastToken?.GetNextToken();
 
