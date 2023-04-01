@@ -904,5 +904,34 @@ namespace Tests
             Assert.IsNotNull(t2);
             Assert.AreEqual("(x: long, y: string, z: real)", t2.Display);
         }
+
+        [TestMethod]
+        public void TestNames_BrackettedDeclared()
+        {
+            var globals = _globals.ApplyCommand(".create table ['T'] (['x']: long, ['y']: string)");
+            var t = globals.Database.GetTable("T");
+            Assert.IsNotNull(t);
+            Assert.AreEqual("(x: long, y: string)", t.Display);
+        }
+
+        [TestMethod]
+        public void TestNames_BrackettedReferenced()
+        {
+            var globals = _globals
+                .AddOrUpdateDatabaseMembers(new TableSymbol("T", "(a: long, b: string)"))
+                .ApplyCommand(".alter table ['T'] (['x']: long, ['y']: string)");
+            var t = globals.Database.GetTable("T");
+            Assert.IsNotNull(t);
+            Assert.AreEqual("(x: long, y: string)", t.Display);
+        }
+
+        [TestMethod]
+        public void TestNames_String()
+        {
+            var globals = _globals.ApplyCommand(".create table 'T' (x: long, y: string)");
+            var t = globals.Database.GetTable("T");
+            Assert.IsNotNull(t);
+            Assert.AreEqual("(x: long, y: string)", t.Display);
+        }
     }
 }

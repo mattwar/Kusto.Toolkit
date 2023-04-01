@@ -6,6 +6,7 @@ using Kusto.Language;
 using Kusto.Language.Symbols;
 using Kusto.Language.Editor;
 using Kusto.Language.Syntax;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace Tests
 {
@@ -86,9 +87,10 @@ namespace Tests
                 nameof(EngineCommands.RenameTable) or
                 nameof(EngineCommands.RenameTables) =>
                     ApplyRenameTable(code, commandRoot),
-                nameof(EngineCommands.DropTable) or
-                nameof(EngineCommands.DropTables) =>
+                nameof(EngineCommands.DropTable) =>
                     ApplyDropTable(code, commandRoot),
+                nameof(EngineCommands.DropTables) =>
+                    ApplyDropTables(code, commandRoot),
                 nameof(EngineCommands.SetTable) =>
                     ApplySetTable(code, commandRoot),
                 nameof(EngineCommands.SetOrAppendTable) =>
@@ -152,7 +154,7 @@ namespace Tests
 
         private static GlobalState ApplyCreateFunction(KustoCode code, CustomCommand commandRoot)
         {
-            var name = commandRoot.GetFirstDescendant<NameDeclaration>(nd => nd.NameInParent == "FunctionName")?.SimpleName;
+            var name = GetNameWithTag(commandRoot, "FunctionName");
             var parameters = commandRoot.GetFirstDescendant<FunctionParameters>()?.ToString();
             var body = commandRoot.GetFirstDescendant<FunctionBody>()?.ToString();
             var docstring = GetPropertyValueText(commandRoot, "docstring");
@@ -169,7 +171,10 @@ namespace Tests
 
         private static GlobalState ApplyAlterFunction(KustoCode code, CustomCommand commandRoot)
         {
-            var name = commandRoot.GetFirstDescendant<NameReference>(nr => nr.GetLastToken().GetNextToken() is SyntaxToken tk && tk.Kind == SyntaxKind.OpenParenToken)?.SimpleName;
+            var name = GetNameAt(commandRoot, e =>
+                ((PreviousTokenIs(e, "function") && GetName(e) != "with")
+                    || (PreviousTokenIs(e, ")") && NextTokenIs(e, "(")))
+                  && GetName(e) != null);
             var parameters = commandRoot.GetFirstDescendant<FunctionParameters>()?.ToString();
             var body = commandRoot.GetFirstDescendant<FunctionBody>()?.ToString();
             var docstring = GetPropertyValueText(commandRoot, "docstring");
@@ -186,7 +191,10 @@ namespace Tests
 
         private static GlobalState ApplyCreateOrAlterFunction(KustoCode code, CustomCommand commandRoot)
         {
-            var name = commandRoot.GetFirstDescendant<NameDeclaration>(nd => nd.GetLastToken().GetNextToken() is SyntaxToken tk && tk.Kind == SyntaxKind.OpenParenToken)?.SimpleName;
+            var name = GetNameAt(commandRoot, e => 
+                ((PreviousTokenIs(e, "function") && GetName(e) != "with") 
+                    || (PreviousTokenIs(e, ")") && NextTokenIs(e, "(")))
+                  && GetName(e) != null);
             var parameters = commandRoot.GetFirstDescendant<FunctionParameters>()?.ToString();
             var body = commandRoot.GetFirstDescendant<FunctionBody>()?.ToString();
             var docstring = GetPropertyValueText(commandRoot, "docstring");
@@ -216,12 +224,12 @@ namespace Tests
 
         private static GlobalState ApplyCreateTable(KustoCode code, CustomCommand commandRoot)
         {
-            var nameNodes = commandRoot.GetDescendants<NameDeclaration>(nd => nd.NameInParent == "TableName");
+            var nameElements = GetElementsWithTag(commandRoot, "TableName");
             var docstring = GetPropertyValueText(commandRoot, "docstring");
 
-            var newTables = nameNodes.Select(nn =>
+            var newTables = nameElements.Select(nn =>
             {
-                var name = nn.SimpleName;
+                var name = GetName(nn);
                 var schema = GetSchemaAfterElement(code, nn);
                 if (schema != null)
                 {
@@ -237,14 +245,14 @@ namespace Tests
 
         private static GlobalState ApplyCreateMergeTable(KustoCode code, CustomCommand commandRoot)
         {
-            var nameNodes = commandRoot.GetDescendants<NameDeclaration>(nd => nd.NameInParent == "TableName");
+            var nameElements = GetElementsWithTag(commandRoot, "TableName");
             var docstring = GetPropertyValueText(commandRoot, "docstring");
 
-            var newTables = nameNodes.Select(nn =>
+            var newTables = nameElements.Select(ne =>
             {
-                var name = nn.SimpleName;
+                var name = GetName(ne);
 
-                var schema = GetSchemaAfterElement(code, nn);
+                var schema = GetSchemaAfterElement(code, ne);
                 if (schema != null)
                 {
                     var newTable = new TableSymbol(name, schema, docstring);
@@ -274,8 +282,8 @@ namespace Tests
 
         private static GlobalState ApplyCreateTableBaseOnAnotherTable(KustoCode code, CustomCommand commandRoot)
         {
-            var existingTableName = commandRoot.GetFirstDescendant<NameDeclaration>(nd => nd.NameInParent == "TableName")?.SimpleName;
-            var newTableName = commandRoot.GetFirstDescendant<NameDeclaration>(nd => nd.NameInParent == "NewTableName")?.SimpleName;
+            var existingTableName = GetNameWithTag(commandRoot, "TableName");
+            var newTableName = GetNameWithTag(commandRoot, "NewTableName");
 
             if (existingTableName != null
                 && newTableName != null
@@ -290,8 +298,8 @@ namespace Tests
 
         private static GlobalState ApplyAlterTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tableNameNode = commandRoot.GetFirstDescendant<NameReference>();
-            var tableName = tableNameNode?.SimpleName;
+            var tableNameNode = GetElementAfterToken(commandRoot, "table");
+            var tableName = GetName(tableNameNode);
             var tableSchema = GetSchemaAfterElement(code, tableNameNode);
             var docstring = GetPropertyValueText(commandRoot, "docstring");
 
@@ -308,8 +316,8 @@ namespace Tests
 
         private static GlobalState ApplyAlterMergeTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tableNameNode = commandRoot.GetFirstDescendant<NameReference>();
-            var tableName = tableNameNode?.SimpleName;
+            var tableNameNode = GetElementAfterToken(commandRoot, "table");
+            var tableName = GetName(tableNameNode);
             var tableSchema = GetSchemaAfterElement(code, tableNameNode);
             var docstring = GetPropertyValueText(commandRoot, "docstring");
 
@@ -338,8 +346,8 @@ namespace Tests
 
         private static GlobalState ApplyAlterTableDocString(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = commandRoot.GetFirstDescendant<NameReference>(cn => cn.NameInParent == "TableName")?.SimpleName;
-            var docString = commandRoot.GetFirstDescendant<LiteralExpression>(lit => lit.NameInParent == "Documentation")?.LiteralValue as string;
+            var tableName = GetNameWithTag(commandRoot, "TableName");
+            var docString = GetLiteralValueWithTag(commandRoot, "Documentation");
 
             if (tableName != null
                 && docString != null
@@ -354,13 +362,15 @@ namespace Tests
 
         private static GlobalState ApplyRenameTable(KustoCode code, CustomCommand commandRoot)
         {
-            var existingTableNameNodes = commandRoot.GetDescendants<NameReference>(nr => nr.NameInParent == "TableName");
+            var existingTableNameElements = GetElementsWithTag(commandRoot, "TableName");
 
-            var replacements = existingTableNameNodes.Select(nn =>
+            var replacements = existingTableNameElements.Select(ne =>
             {
-                var newTableName = nn.Parent.GetFirstDescendant<NameDeclaration>(nd => nd.NameInParent == "NewTableName")?.SimpleName;
-                if (newTableName != null
-                    && code.Globals.Database.GetTable(nn.SimpleName) is TableSymbol existingTable)
+                var tableName = GetName(ne);
+                var newTableName = GetNameWithTag(ne.Parent, "NewTableName");
+
+                if (tableName != null && newTableName != null
+                    && code.Globals.Database.GetTable(tableName) is TableSymbol existingTable)
                 {
                     return (existingTable, existingTable.WithName(newTableName));
                 }
@@ -375,8 +385,20 @@ namespace Tests
 
         private static GlobalState ApplyDropTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tables = commandRoot.GetDescendants<NameReference>()
-                .Select(nr => code.Globals.Database.GetTable(nr.SimpleName))
+            var tables = GetNamesWithTag(commandRoot, "TableName")
+                .Select(n => code.Globals.Database.GetTable(n))
+                .Where(t => t != null)
+                .ToList();
+            return code.Globals.RemoveDatabaseMembers(tables);
+        }
+
+        private static GlobalState ApplyDropTables(KustoCode code, CustomCommand commandRoot)
+        {
+            var tables = GetElementsAt(commandRoot, e => (PreviousTokenIs(e, "(") || PreviousTokenIs(e, ",")) && GetName(e) != null)
+                .Select(e => GetName(e))
+                .Where(n => n != null)
+                .Distinct()
+                .Select(n => code.Globals.Database.GetTable(n))
                 .Where(t => t != null)
                 .ToList();
             return code.Globals.RemoveDatabaseMembers(tables);
@@ -384,7 +406,7 @@ namespace Tests
 
         private static GlobalState ApplySetTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = commandRoot.GetFirstDescendant<Name>()?.SimpleName;
+            var tableName = GetNameAt(commandRoot, e => PreviousTokenIs(e, "set") || PreviousTokenIs(e, "async"));
             var docstring = GetPropertyValueText(commandRoot, "docstring");
 
             if (tableName != null
@@ -402,7 +424,7 @@ namespace Tests
 
         private static GlobalState ApplyAppendTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = commandRoot.GetFirstDescendant<Name>()?.SimpleName;
+            var tableName = GetNameAt(commandRoot, e => PreviousTokenIs(e, "append") || PreviousTokenIs(e, "async"));
             var docstring = GetPropertyValueText(commandRoot, "docstring");
             var extend = GetPropertyValue(commandRoot, "extend_schema", false);
 
@@ -424,7 +446,7 @@ namespace Tests
 
         private static GlobalState ApplySetOrAppendTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = commandRoot.GetFirstDescendant<Name>()?.SimpleName;
+            var tableName = GetNameAt(commandRoot, e => PreviousTokenIs(e, "set-or-append") || PreviousTokenIs(e, "async"));
             var docstring = GetPropertyValueText(commandRoot, "docstring");
             var extend = GetPropertyValue(commandRoot, "extend_schema", false);
 
@@ -455,7 +477,7 @@ namespace Tests
 
         private static GlobalState ApplySetOrReplaceTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = commandRoot.GetFirstDescendant<Name>()?.SimpleName;
+            var tableName = GetNameAt(commandRoot, e => PreviousTokenIs(e, "set-or-replace") || PreviousTokenIs(e, "async"));
             var docstring = GetPropertyValueText(commandRoot, "docstring");
             var extend = GetPropertyValue(commandRoot, "extend_schema", false);
             var recreate = GetPropertyValue(commandRoot, "recreate_schema", false);
@@ -492,13 +514,13 @@ namespace Tests
 
         private static GlobalState ApplyAlterColumnType(KustoCode code, CustomCommand commandRoot)
         {
-            var columnNameNode = commandRoot.GetFirstDescendant<Expression>(e => e.NameInParent == "ColumnName");
-            var columnTypeNode = commandRoot.GetFirstDescendant<TypeExpression>(e => e.NameInParent == "ColumnType");
+            var columnNameElement = GetElementAfterToken(commandRoot, "column");
+            var columnTypeElement = GetElementAfterToken(commandRoot, "=");
 
-            if (columnNameNode != null
-                && columnTypeNode != null
-                && TryGetDatabaseTableAndColumn(code.Globals, columnNameNode, out var database, out var table, out var column)
-                && GetColumnType(columnTypeNode) is ScalarSymbol columnType)
+            if (columnNameElement != null
+                && columnTypeElement != null
+                && TryGetDatabaseTableAndColumn(code.Globals, columnNameElement, out var database, out var table, out var column)
+                && GetColumnType(columnTypeElement) is ScalarSymbol columnType)
             {
                 var newColumn = column!.WithType(columnType);
                 var newTable = table!.AddOrUpdateColumns(newColumn);
@@ -511,9 +533,9 @@ namespace Tests
 
         private static GlobalState ApplyDropColumn(KustoCode code, CustomCommand commandRoot)
         {
-            var columnNameNode = commandRoot.GetFirstDescendant<Expression>(e => e.NameInParent == "ColumnName");
-            if (columnNameNode != null
-                && TryGetDatabaseTableAndColumn(code.Globals, columnNameNode, out var database, out var table, out var column))
+            var columnNameElement = GetElementWithTag(commandRoot, "ColumnName");
+            if (columnNameElement != null
+                && TryGetDatabaseTableAndColumn(code.Globals, columnNameElement, out var database, out var table, out var column))
             {
                 var newTable = table!.RemoveColumns(column!);
                 var newDb = database!.AddOrUpdateMembers(newTable);
@@ -525,7 +547,7 @@ namespace Tests
 
         private static GlobalState ApplyDropTableColumns(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = commandRoot.GetFirstDescendant<NameReference>(n => n.NameInParent == "TableName")?.SimpleName;
+            var tableName = GetNameWithTag(commandRoot, "TableName");
 
             if (code.Globals.Database.GetTable(tableName) is TableSymbol table)
             {
@@ -545,12 +567,12 @@ namespace Tests
 
         private static GlobalState ApplyRenameColumn(KustoCode code, CustomCommand commandRoot)
         {
-            var columnNameNode = commandRoot.GetFirstDescendant<Expression>(e => e.NameInParent == "ColumnName");
-            var newColumnName = commandRoot.GetFirstDescendant<NameDeclaration>(e => e.NameInParent == "NewColumnName")?.SimpleName;
+            var columnNameElement = GetElementWithTag(commandRoot, "ColumnName");
+            var newColumnName = GetNameWithTag(commandRoot, "NewColumnName");
 
             if (newColumnName != null
-                && columnNameNode != null
-                && TryGetDatabaseTableAndColumn(code.Globals, columnNameNode, out var database, out var table, out var column))
+                && columnNameElement != null
+                && TryGetDatabaseTableAndColumn(code.Globals, columnNameElement, out var database, out var table, out var column))
             {
                 var newColumn = column!.WithName(newColumnName);
                 var newTable = table!.ReplaceColumns((column, newColumn));
@@ -563,18 +585,18 @@ namespace Tests
 
         private static GlobalState ApplyRenameColumns(KustoCode code, CustomCommand commandRoot)
         {
-            var columnNameReplacements = commandRoot
-                .GetDescendants<NameDeclaration>(nd => nd.NameInParent == "NewColumnName")
-                .Select(nd =>
+            var columnNameReplacements = GetElementsWithTag(commandRoot, "NewColumnName")
+                .Select(ne =>
                 {
-                    var equalToken = nd.GetLastToken().GetNextToken();
+                    var equalToken = ne.GetLastToken().GetNextToken();
                     if (equalToken != null
                         && equalToken.Kind == SyntaxKind.EqualToken
                         && GetNextPeer(equalToken) is Expression originalNameNode
                         && TryGetDatabaseTableAndColumn(code.Globals, originalNameNode,
                             out var database, out var table, out var column))
                     {
-                        return (database, table, column, newName: nd.SimpleName);
+                        var newName = GetName(ne);
+                        return (database, table, column, newName);
                     }
                     else
                     {
@@ -599,13 +621,13 @@ namespace Tests
 
         private static GlobalState ApplyAlterTableColumnDocStrings(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = commandRoot.GetFirstDescendant<NameReference>(nr => nr.NameInParent == "TableName")?.SimpleName;
+            var tableName = GetNameWithTag(commandRoot, "TableName");
             if (tableName != null && code.Globals.Database.GetTable(tableName) is TableSymbol table)
             {
-                var newColumnMap = commandRoot.GetDescendants<NameReference>(nr => nr.NameInParent == "ColumnName")
+                var newColumnMap = GetElementsWithTag(commandRoot, "ColumnName")
                     .Select(cn =>
                     {
-                        var columnName = cn.SimpleName;
+                        var columnName = GetName(cn);
                         if (table.Columns.FirstOrDefault(c => c.Name == columnName) is ColumnSymbol column)
                         {
                             var colon = cn.GetLastToken().GetNextToken();
@@ -635,13 +657,13 @@ namespace Tests
 
         private static GlobalState ApplyAlterMergeTableColumnDocStrings(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = commandRoot.GetFirstDescendant<NameReference>(nr => nr.NameInParent == "TableName")?.SimpleName;
+            var tableName = GetNameWithTag(commandRoot, "TableName");
             if (tableName != null && code.Globals.Database.GetTable(tableName) is TableSymbol table)
             {
-                var newColumns = commandRoot.GetDescendants<NameReference>(nr => nr.NameInParent == "ColumnName")
+                var newColumns = GetElementsWithTag(commandRoot, "ColumnName")
                     .Select(cn =>
                     {
-                        var columnName = cn.SimpleName;
+                        var columnName = GetName(cn);
                         if (table.Columns.FirstOrDefault(c => c.Name == columnName) is ColumnSymbol column)
                         {
                             var colon = cn.GetLastToken().GetNextToken();
@@ -668,10 +690,10 @@ namespace Tests
 
         private static GlobalState ApplyCreateExternalTable(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = commandRoot.GetFirstDescendant<NameDeclaration>(nn => nn.NameInParent == "ExternalTableName");
-            if (nn != null && code.Globals.Database.GetExternalTable(nn.SimpleName) == null)
+            var nn = GetElementWithTag(commandRoot, "ExternalTableName");
+            var name = GetName(nn);
+            if (name != null && code.Globals.Database.GetExternalTable(name) == null)
             {
-                var name = nn.SimpleName;
                 var schema = GetSchemaAfterElement(code, nn);
                 if (schema != null)
                 {
@@ -686,10 +708,10 @@ namespace Tests
 
         private static GlobalState ApplyAlterExternalTable(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = commandRoot.GetFirstDescendant<NameDeclaration>(nn => nn.NameInParent == "ExternalTableName");
-            if (nn != null && code.Globals.Database.GetExternalTable(nn.SimpleName) is ExternalTableSymbol et)
+            var nn = GetElementWithTag(commandRoot, "ExternalTableName");
+            var name = GetName(nn);
+            if (name != null && code.Globals.Database.GetExternalTable(name) is ExternalTableSymbol et)
             {
-                var name = nn.SimpleName;
                 var schema = GetSchemaAfterElement(code, nn);
                 if (schema != null)
                 {
@@ -704,10 +726,10 @@ namespace Tests
 
         private static GlobalState ApplyCreateOrAlterExternalTable(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = commandRoot.GetFirstDescendant<NameDeclaration>(nn => nn.NameInParent == "ExternalTableName");
-            if (nn != null)
+            var nn = GetElementWithTag(commandRoot, "ExternalTableName");
+            var name = GetName(nn);
+            if (name != null)
             {
-                var name = nn.SimpleName;
                 var schema = GetSchemaAfterElement(code, nn);
                 if (schema != null)
                 {
@@ -722,8 +744,9 @@ namespace Tests
 
         private static GlobalState ApplyDropExternalTable(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = commandRoot.GetFirstDescendant<NameReference>(nn => nn.NameInParent == "ExternalTableName");
-            if (nn != null && code.Globals.Database.GetExternalTable(nn.SimpleName) is ExternalTableSymbol et)
+            var nn = GetElementWithTag(commandRoot, "ExternalTableName");
+            var name = GetName(nn);
+            if (name != null && code.Globals.Database.GetExternalTable(name) is ExternalTableSymbol et)
             {
                 return code.Globals.RemoveDatabaseMembers(et);
             }
@@ -733,12 +756,14 @@ namespace Tests
 
         private static GlobalState ApplyCreateMaterializedView(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = commandRoot.GetFirstDescendant<NameDeclaration>(nn =>
-                (PreviousTokenIs(nn, "materialized-view") || PreviousTokenIs(nn, ")")) && NextTokenIs(nn, "on"));
+            var nn = GetElementAt(commandRoot, nn =>
+                ((PreviousTokenIs(nn, "materialized-view") && GetName(nn) != "with") 
+                    || (PreviousTokenIs(nn, ")") && NextTokenIs(nn, "on")))
+                 && GetName(nn) != null);
+            var name = GetName(nn);
 
-            if (nn != null && code.Globals.Database.GetMaterializedView(nn.SimpleName) == null)
+            if (name != null && code.Globals.Database.GetMaterializedView(name) == null)
             {
-                var name = nn.SimpleName;
                 var docstring = GetPropertyValueText(commandRoot, "docstring");
                 var body = commandRoot.GetFirstDescendant<FunctionBody>();
                 var schema = GetMaterializedViewResult(code);
@@ -755,12 +780,11 @@ namespace Tests
 
         private static GlobalState ApplyAlterMaterializedView(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = commandRoot.GetFirstDescendant<NameReference>(nn =>
-                (PreviousTokenIs(nn, "materialized-view") || PreviousTokenIs(nn, ")")) && NextTokenIs(nn, "on"));
+            var nn = GetElementAt(commandRoot, nn => (PreviousTokenIs(nn, "materialized-view") || PreviousTokenIs(nn, ")")) && NextTokenIs(nn, "on"));
+            var name = GetName(nn);
 
-            if (nn != null && code.Globals.Database.GetMaterializedView(nn.SimpleName) != null)
+            if (name != null && code.Globals.Database.GetMaterializedView(name) != null)
             {
-                var name = nn.SimpleName;
                 var docstring = GetPropertyValueText(commandRoot, "docstring");
                 var body = commandRoot.GetFirstDescendant<FunctionBody>();
                 var schema = GetMaterializedViewResult(code);
@@ -777,12 +801,11 @@ namespace Tests
 
         private static GlobalState ApplyCreateOrAlterMaterializedView(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = commandRoot.GetFirstDescendant<NameReference>(nn =>
-                (PreviousTokenIs(nn, "materialized-view") || PreviousTokenIs(nn, ")")) && NextTokenIs(nn, "on"));
+            var nn = GetElementAt(commandRoot, nn => (PreviousTokenIs(nn, "materialized-view") || PreviousTokenIs(nn, ")")) && NextTokenIs(nn, "on"));
+            var name = GetName(nn);
 
-            if (nn != null)
+            if (name != null)
             {
-                var name = nn.SimpleName;
                 var docstring = GetPropertyValueText(commandRoot, "docstring");
                 var body = commandRoot.GetFirstDescendant<FunctionBody>();
                 var schema = GetMaterializedViewResult(code);
@@ -891,7 +914,8 @@ namespace Tests
         }
 
         private static bool TryGetDatabaseTableAndColumn(
-            GlobalState globals, Expression expr,
+            GlobalState globals, 
+            SyntaxElement expr,
             out DatabaseSymbol? database,
             out TableSymbol? table,
             out ColumnSymbol? column)
@@ -917,6 +941,10 @@ namespace Tests
                     return database != null && table != null && column != null;
                 }
             }
+            else if (expr is CustomNode && expr.ChildCount == 1)
+            {
+                return TryGetDatabaseTableAndColumn(globals, expr.GetChild(0), out database, out table, out column);
+            }
 
             database = null;
             table = null;
@@ -924,13 +952,21 @@ namespace Tests
             return false;
         }
 
-        private static ScalarSymbol? GetColumnType(TypeExpression tex)
+        /// <summary>
+        /// Gets the column type info from the element
+        /// </summary>
+        private static ScalarSymbol? GetColumnType(SyntaxElement element)
         {
-            return tex is PrimitiveTypeExpression pex
-                ? ScalarTypes.GetSymbol(pex.Type.Text)
-                : null;
+            if (element is PrimitiveTypeExpression pex)
+                return ScalarTypes.GetSymbol(pex.Type.Text);
+            else if (element is CustomNode && element.ChildCount == 1)
+                return GetColumnType(element.GetChild(0));
+            return null;
         }
 
+        /// <summary>
+        /// Get's the schema immediately after the specified element.
+        /// </summary>
         private static string? GetSchemaAfterElement(KustoCode code, SyntaxElement? element)
         {
             var openParen = element?.GetLastToken()?.GetNextToken();
@@ -946,20 +982,84 @@ namespace Tests
             return null;
         }
 
+        /// <summary>
+        /// Gets the name from the element with the specified tag.
+        /// </summary>
+        private static string? GetNameWithTag(SyntaxElement root, string tag)
+        {
+            return GetName(GetElementWithTag(root, tag));
+        }
+
+        /// <summary>
+        /// Gets the names from the elements with the specified tag.
+        /// </summary>
+        private static IReadOnlyList<string> GetNamesWithTag(SyntaxElement root, string tag)
+        {
+            return GetElementsWithTag(root, tag)
+                .Where(e => e != null)
+                .Select(n => GetName(n))
+                .Where(n => n != null)
+                .ToList()!;
+        }
+
+        /// <summary>
+        /// Gets the elements with the specified tag.
+        /// </summary>
+        private static SyntaxElement? GetElementWithTag(SyntaxElement root, string tag)
+        {
+            return root.GetFirstDescendant<SyntaxElement>(e => e.NameInParent == tag);
+        }
+
+        /// <summary>
+        /// Gets all the elements with the specified tag.
+        /// </summary>
+        private static IReadOnlyList<SyntaxElement> GetElementsWithTag(SyntaxElement root, string tag)
+        {
+            return root.GetDescendants<SyntaxElement>(e => e.NameInParent == tag);
+        }
+
+        /// <summary>
+        /// Gets the name matching the selector.
+        /// </summary>
+        private static string? GetNameAt(SyntaxElement root, Func<SyntaxElement, bool> selector)
+        {
+            return GetName(GetElementAt(root, selector));
+        }
+
+        /// <summary>
+        /// Gets the name immediately after the token with the specified text.
+        /// </summary>
         private static string? GetNameAfterToken(SyntaxElement root, string tokenText)
         {
             var token = root.GetFirstDescendant<SyntaxToken>(tk => tk.Text == tokenText);
             return GetNameAfterElement(token);
         }
 
+        /// <summary>
+        /// Get's the name immediately after the given element.
+        /// </summary>
         private static string? GetNameAfterElement(SyntaxElement element)
         {
-            var next = GetNextPeer(element);
-            if (next is NameReference nr)
+            return GetName(GetNextPeer(element));
+        }
+
+        /// <summary>
+        /// Get's the name represented by the element.
+        /// </summary>
+        private static string? GetName(SyntaxElement? element)
+        {
+            if (element is NameReference nr)
                 return nr.SimpleName;
-            else if (next is NameDeclaration nd)
+            else if (element is NameDeclaration nd)
                 return nd.SimpleName;
+            else if (element is LiteralExpression lit)
+                return lit.LiteralValue.ToString();
+            else if (element is SyntaxToken tok)
+                return tok.ValueText;
+            else if (element is CustomNode && element.ChildCount == 1)
+                return GetName(element.GetChild(0));
             return null;
+
         }
 
         private static string? GetLiteralValueAfterToken(SyntaxElement root, string tokenText)
@@ -968,12 +1068,48 @@ namespace Tests
             return GetLiteralValueAfterElement(token);
         }
 
-        private static string? GetLiteralValueAfterElement(SyntaxElement element)
+        private static string? GetLiteralValueAfterElement(SyntaxElement? element)
         {
-            var next = GetNextPeer(element);
-            if (next is LiteralExpression lit)
+            return GetLiteralValue(GetNextPeer(element));
+        }
+
+        private static string? GetLiteralValueWithTag(SyntaxElement root, string tag)
+        {
+            return GetLiteralValue(GetElementWithTag(root, tag));
+        }
+
+        private static string? GetLiteralValue(SyntaxElement? element)
+        {
+            if (element is LiteralExpression lit)
                 return lit.LiteralValue.ToString();
             return null;
+        }
+
+        private static SyntaxElement? GetElementAfterToken(SyntaxElement root, string tokenText)
+        {
+            var token = root.GetFirstDescendant<SyntaxToken>(tk => tk.Text == tokenText);
+            return GetElementAfterElement(token);
+        }
+
+        private static SyntaxElement? GetElementAfterElement(SyntaxElement? element)
+        {
+            return GetNextPeer(element);
+        }
+
+        /// <summary>
+        /// Gets the element matching the selector.
+        /// </summary>
+        private static SyntaxElement? GetElementAt(SyntaxElement root, Func<SyntaxElement, bool> selector)
+        {
+            return root.GetFirstDescendant<SyntaxElement>(e => selector(e));
+        }
+
+        /// <summary>
+        /// Gets the elements matching the selector.
+        /// </summary>
+        private static IReadOnlyList<SyntaxElement> GetElementsAt(SyntaxElement root, Func<SyntaxElement, bool> selector)
+        {
+            return root.GetDescendants<SyntaxElement>(e => selector(e));
         }
 
         private static string? GetPropertyValueText(SyntaxElement root, string propertyName)
@@ -1096,7 +1232,7 @@ namespace Tests
             return nextToken != null && nextToken.Text == tokenText;
         }
 
-        private static SyntaxElement? GetNextPeer(SyntaxElement element)
+        private static SyntaxElement? GetNextPeer(SyntaxElement? element)
         {
             var lastToken = element is SyntaxToken elementToken ? elementToken : element.GetLastToken();
             var nextToken = lastToken?.GetNextToken();
