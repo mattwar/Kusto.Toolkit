@@ -10,44 +10,77 @@ namespace Kusto.Toolkit
     public static partial class KustoCodeExtensions
     {
         /// <summary>
-        /// Returns a list of all the database tables that are explicitly referenced in the query.
+        /// Returns a list of all the database tables that are referenced in the query.
         /// </summary>
         public static IReadOnlyList<TableSymbol> GetDatabaseTablesReferenced(this KustoCode code)
         {
-            var tableSet = new HashSet<TableSymbol>();
-            var tableList = new List<TableSymbol>();
-            GatherTables(code.Syntax);
-            return tableList;
+            return code.GetDatabaseMembersReferenced<TableSymbol>();
+        }
 
-            void GatherTables(SyntaxNode root)
+        /// <summary>
+        /// Returns a list of all the stored functions that are used in the query.
+        /// </summary>
+        public static IReadOnlyList<FunctionSymbol> GetStoredFunctionsReferenced(this KustoCode code)
+        {
+            return code.GetDatabaseMembersReferenced<FunctionSymbol>();
+        }
+
+        /// <summary>
+        /// Returns a list of all the external tables referenced in the query.
+        /// </summary>
+        public static IReadOnlyList<ExternalTableSymbol> GetExternalTablesReferenced(this KustoCode code)
+        {
+            return code.GetDatabaseMembersReferenced<ExternalTableSymbol>();
+        }
+
+        /// <summary>
+        /// Returns a list of all the materialized views referenced in the query.
+        /// </summary>
+        public static IReadOnlyList<MaterializedViewSymbol> GetMaterializedViewsReferenced(this KustoCode code)
+        {
+            return code.GetDatabaseMembersReferenced<MaterializedViewSymbol>();
+        }
+
+        /// <summary>
+        /// Returns a list of all the database members (tables, functions, external tables, materialized views, etc) that are used in the query.
+        /// </summary>
+        public static IReadOnlyList<TMember> GetDatabaseMembersReferenced<TMember>(this KustoCode code, Func<TMember, bool>? predicate = null)
+            where TMember : Symbol
+        {
+            var memberSet = new HashSet<TMember>();
+            var memberList = new List<TMember>();
+            GatherMembers(code.Syntax);
+            return memberList;
+
+            void GatherMembers(SyntaxNode root)
             {
                 SyntaxElement.WalkNodes(root,
                     fnBefore: n =>
                     {
-                        if (n.ReferencedSymbol is TableSymbol ntab)
+                        if (n.ReferencedSymbol is GroupSymbol referencedGroup)
                         {
-                            AddTable(ntab);
+                            AddGroupMembers(referencedGroup);
                         }
-                        else if (n.ReferencedSymbol is GroupSymbol ng)
+                        else if (n.ReferencedSymbol is TMember member)
                         {
-                            AddGroupTables(ng);
+                            AddMember(member);
                         }
-    
+
                         if (n is Expression e)
                         {
-                            if (e.ResultType is TableSymbol ts)
+                            if (e.ResultType is GroupSymbol resultGroup)
                             {
-                                AddTable(ts);
+                                AddGroupMembers(resultGroup);
                             }
-                            else if (e.ResultType is GroupSymbol eg)
+                            else if (e.ResultType is TMember member)
                             {
-                                AddGroupTables(eg);
+                                AddMember(member);
                             }
                         }
 
                         if (n.GetCalledFunctionBody() is SyntaxNode body)
                         {
-                            GatherTables(body);
+                            GatherMembers(body);
                         }
                     },
                     fnDescend: n =>
@@ -56,24 +89,38 @@ namespace Kusto.Toolkit
                     );
             }
 
-            void AddTable(TableSymbol table)
+            bool Matches(TMember member)
             {
-                if (code.Globals.IsDatabaseTable(table))
+                // if TMember is TableSymbol, only match exact type, not sub types
+                if (typeof(TMember) == typeof(TableSymbol)
+                    && member.GetType() != typeof(TMember))
                 {
-                    if (tableSet.Add(table))
-                        tableList.Add(table);
+                    return false;
+                }
+
+                return predicate == null || predicate(member);
+            }
+
+            void AddMember(TMember member)
+            {
+                if (code.Globals.IsDatabaseSymbol(member) 
+                    && Matches(member))
+                {
+                    if (memberSet.Add(member))
+                        memberList.Add(member);
                 }
             }
 
-            void AddGroupTables(GroupSymbol group)
+            void AddGroupMembers(GroupSymbol group)
             {
-                if (group.Members.Count > 0
-                    && group.Members[0] is TableSymbol)
+                if (group.Members.Count > 0)
                 {
-                    foreach (var member in group.Members)
+                    foreach (var groupMember in group.Members)
                     {
-                        if (member is TableSymbol table)
-                            AddTable(table);
+                        if (groupMember is TMember member)
+                        {
+                            AddMember(member);
+                        }
                     }
                 }
             }

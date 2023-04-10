@@ -235,6 +235,44 @@ namespace Tests
             Assert.AreEqual(expectedColumnNames, actualColumnNames);
         }
 
+        [TestMethod]
+        public void TestGetDatabaseFunctions()
+        {
+            var globals = GetGlobals(
+                new DatabaseSymbol("db",
+                    new TableSymbol("T", "(x: long, y: string)"),
+                    new FunctionSymbol("Fn1", "(a: long)", "{ T | where x == a }"),
+                    new FunctionSymbol("Fn2", "(b: string)", "{ T | where y == b }"),
+                    new FunctionSymbol("Fn3", "()", "{ Fn2('bbb') }")
+                    ));
+
+            TestGetStoredFunctions("Fn1(10)", "db.Fn1", globals);
+            //TestGetDatabaseFunctions("Fn2('bbb')", "db.Fn2", globals);
+            //TestGetDatabaseFunctions("Fn3()", "db.Fn2, db.Fn3", globals);
+        }
+
+        private static void TestGetStoredFunctions(string query, string functionNames, GlobalState globals)
+        {
+            var code = KustoCode.ParseAndAnalyze(query, globals);
+            var dx = code.GetDiagnostics();
+            if (dx.Count > 0)
+            {
+                Assert.Fail($"unexpected diagnostic: {dx[0].Message}");
+            }
+
+            var expectedFunctions = GetFunctions(functionNames, globals);
+            var actualFunctions = code.GetStoredFunctionsReferenced();
+
+            var expectedDottedNames = expectedFunctions.Select(t => GetDottedName(t, globals)).OrderBy(x => x).ToArray();
+            var actualDottedNames = actualFunctions.Select(t => GetDottedName(t, globals)).OrderBy(x => x).ToArray();
+
+            var expectedFunctionNames = string.Join(", ", expectedDottedNames);
+            var actualFunctionNames = string.Join(", ", actualDottedNames);
+
+            Assert.AreEqual(expectedFunctionNames, actualFunctionNames);
+        }
+
+
         #region Test Helpers
         private static GlobalState GetGlobals(params ClusterSymbol[] clusters)
         {
@@ -251,7 +289,7 @@ namespace Tests
 
         private static TableSymbol[] GetTables(string tableNames, GlobalState globals)
         {
-            var qualifiedNames = ParseTableNames(tableNames);
+            var qualifiedNames = ParseQualifiedNames(tableNames);
             return qualifiedNames.Select(qn => GetTable(qn, globals)).ToArray();
         }
 
@@ -259,6 +297,12 @@ namespace Tests
         {
             var qualifiedNames = ParseColumnNames(columnNames);
             return qualifiedNames.Select(qn => GetColumn(qn, globals)).ToArray();
+        }
+
+        private static FunctionSymbol[] GetFunctions(string tableNames, GlobalState globals)
+        {
+            var qualifiedNames = ParseQualifiedNames(tableNames);
+            return qualifiedNames.Select(qn => GetFunction(qn, globals)).ToArray();
         }
 
         private static string GetDottedName(DatabaseSymbol database, GlobalState globals)
@@ -300,9 +344,22 @@ namespace Tests
             }
         }
 
-        private static QualifiedName[] ParseTableNames(string tableNames)
+        private static string GetDottedName(FunctionSymbol function, GlobalState globals)
         {
-            return SplitNames(tableNames).Select(n => QualifiedName.ParseTable(n)).ToArray();
+            var database = globals.GetDatabase(function);
+            if (database != null)
+            {
+                return $"{GetDottedName(database, globals)}.{function.Name}";
+            }
+            else
+            {
+                return function.Name;
+            }
+        }
+
+        private static QualifiedName[] ParseQualifiedNames(string tableNames)
+        {
+            return SplitNames(tableNames).Select(n => QualifiedName.ParseEntity(n)).ToArray();
         }
 
         private static QualifiedName[] ParseColumnNames(string columnNames)
@@ -344,7 +401,7 @@ namespace Tests
         private static TableSymbol GetTable(QualifiedName name, GlobalState globals)
         {
             var database = GetDatabase(name, globals);
-            return database?.GetTable(name.TableName);
+            return database?.GetTable(name.EntityName);
         }
 
         private static ColumnSymbol GetColumn(QualifiedName name, GlobalState globals)
@@ -353,18 +410,24 @@ namespace Tests
             return table?.GetColumn(name.ColumnName);
         }
 
+        private static FunctionSymbol GetFunction(QualifiedName name, GlobalState globals)
+        {
+            var database = GetDatabase(name, globals);
+            return database?.GetFunction(name.EntityName);
+        }
+
         private class QualifiedName
         {
             public string ClusterName { get; }
             public string DatabaseName { get; }
-            public string TableName { get; }
+            public string EntityName { get; }
             public string ColumnName { get; }
 
             public QualifiedName(string cluster, string database, string table, string column)
             {
                 this.ClusterName = cluster ?? "";
                 this.DatabaseName = database ?? "";
-                this.TableName = table ?? "";
+                this.EntityName = table ?? "";
                 this.ColumnName = column ?? "";
             }
 
@@ -382,7 +445,7 @@ namespace Tests
                 }
             }
 
-            public static QualifiedName ParseTable(string name)
+            public static QualifiedName ParseEntity(string name)
             {
                 var parts = name.Split(".");
                 switch (parts.Length)
