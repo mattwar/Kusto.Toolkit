@@ -4,7 +4,7 @@ using System.Linq;
 using Kusto.Language;
 using Kusto.Language.Symbols;
 
-namespace Tests
+namespace Kusto.Toolkit
 {
     public static class SymbolExtensions
     {

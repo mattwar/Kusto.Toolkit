@@ -6,9 +6,8 @@ using Kusto.Language;
 using Kusto.Language.Symbols;
 using Kusto.Language.Editor;
 using Kusto.Language.Syntax;
-using static System.Net.Mime.MediaTypeNames;
 
-namespace Tests
+namespace Kusto.Toolkit
 {
     public static partial class GlobalStateExtensions
     {

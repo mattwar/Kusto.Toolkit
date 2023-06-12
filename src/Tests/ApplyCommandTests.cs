@@ -332,7 +332,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".set T2 <| T");
             var t2 = globals2.Database.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(x: long, y: string)", t2.Display);
+            Assert.AreEqual("(x: long, y: string)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -356,7 +356,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".append T <| T extend z=1.0");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, y: string)", t.Display);
+            Assert.AreEqual("(x: long, y: string)", t.ToTestString());
         }
 
         [TestMethod]
@@ -368,7 +368,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".append T with (extend_schema=true) <| T extend z=1.0");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, y: string, z: real)", t.Display);
+            Assert.AreEqual("(x: long, y: string, z: real)", t.ToTestString());
         }
 
         [TestMethod]
@@ -392,7 +392,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".set-or-append T2 <| T");
             var t2 = globals2.Database.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(a: long, b: string, c: real)", t2.Display);
+            Assert.AreEqual("(a: long, b: string, c: real)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -405,7 +405,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".set-or-append T2 <| T");
             var t2 = globals2.Database.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(x: long, y: string)", t2.Display);
+            Assert.AreEqual("(x: long, y: string)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -418,7 +418,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".set-or-append T2 with (extend_schema=true) <| T");
             var t2 = globals2.Database.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(x: long, y: string, c: real)", t2.Display);
+            Assert.AreEqual("(x: long, y: string, c: real)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -442,7 +442,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".set-or-replace T2 <| T");
             var t2 = globals2.Database.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(a: long, b: string)", t2.Display);
+            Assert.AreEqual("(a: long, b: string)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -455,7 +455,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".set-or-replace T2 <| T");
             var t2 = globals2.Database.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(x: long, y: string)", t2.Display);
+            Assert.AreEqual("(x: long, y: string)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -468,7 +468,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".set-or-replace T2 with (extend_schema=true) <| T");
             var t2 = globals2.Database.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(x: long, y: string, c: real)", t2.Display);
+            Assert.AreEqual("(x: long, y: string, c: real)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -481,7 +481,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".set-or-replace T2 with (recreate_schema=true) <| T");
             var t2 = globals2.Database.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(a: long, b: string, c: real)", t2.Display);
+            Assert.AreEqual("(a: long, b: string, c: real)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -505,7 +505,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".alter column T.y type = real");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, y: real)", t.Display);
+            Assert.AreEqual("(x: long, y: real)", t.ToTestString());
         }
 
         [TestMethod]
@@ -521,7 +521,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".alter column ['db2'].T.y type = real");
             var t = globals2.Cluster.GetDatabase("db2").GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, y: real)", t.Display);
+            Assert.AreEqual("(x: long, y: real)", t.ToTestString());
         }
 
         [TestMethod]
@@ -533,7 +533,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".drop column T.y");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long)", t.Display);
+            Assert.AreEqual("(x: long)", t.ToTestString());
         }
 
         [TestMethod]
@@ -545,7 +545,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".drop table T columns (x, z)");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(y: string)", t.Display);
+            Assert.AreEqual("(y: string)", t.ToTestString());
         }
 
         [TestMethod]
@@ -557,7 +557,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".rename column T.y to why");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, why: string)", t.Display);
+            Assert.AreEqual("(x: long, why: string)", t.ToTestString());
         }
 
         [TestMethod]
@@ -573,12 +573,12 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".rename columns why=T.y, why2=db2.T2.y");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, why: string)", t.Display);
+            Assert.AreEqual("(x: long, why: string)", t.ToTestString());
             var db2 = globals2.Cluster.GetDatabase("db2");
             Assert.IsNotNull(db2);
             var t2 = db2.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(x: long, why2: string)", t2.Display);
+            Assert.AreEqual("(x: long, why2: string)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -621,7 +621,7 @@ namespace Tests
             var globals = _globals.ApplyCommand(".create external table ET (x: long, y: string) kind=storage dataformat=json ('connection')");
             var et = globals.Database.GetExternalTable("ET");
             Assert.IsNotNull(et);
-            Assert.AreEqual("(x: long, y: string)", et.Display);
+            Assert.AreEqual("(x: long, y: string)", et.ToTestString());
         }
 
         [TestMethod]
@@ -633,7 +633,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".create external table ET (x: long, y: string) kind=storage dataformat=json ('connection')");
             var et = globals2.Database.GetExternalTable("ET");
             Assert.IsNotNull(et);
-            Assert.AreEqual("(a: long, b: string)", et.Display);
+            Assert.AreEqual("(a: long, b: string)", et.ToTestString());
         }
 
         [TestMethod]
@@ -654,7 +654,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".alter external table ET (x: long, y: string) kind=storage dataformat=json ('connection')");
             var et = globals2.Database.GetExternalTable("ET");
             Assert.IsNotNull(et);
-            Assert.AreEqual("(x: long, y: string)", et.Display);
+            Assert.AreEqual("(x: long, y: string)", et.ToTestString());
         }
 
         [TestMethod]
@@ -687,7 +687,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".create-or-alter external table ET (x: long, y: string) kind=storage dataformat=json ('connection')");
             var et = globals2.Database.GetExternalTable("ET");
             Assert.IsNotNull(et);
-            Assert.AreEqual("(x: long, y: string)", et.Display);
+            Assert.AreEqual("(x: long, y: string)", et.ToTestString());
         }
 
         [TestMethod]
@@ -697,7 +697,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".create-or-alter external table ET (x: long, y: string) kind=storage dataformat=json ('connection')");
             var et = globals2.Database.GetExternalTable("ET");
             Assert.IsNotNull(et);
-            Assert.AreEqual("(x: long, y: string)", et.Display);
+            Assert.AreEqual("(x: long, y: string)", et.ToTestString());
         }
 
         [TestMethod]
@@ -716,7 +716,7 @@ namespace Tests
             var globals = _globals.ApplyCommand(".create external table ET (x: long, y: string) kind=sql table=Customers ('connection')");
             var et = globals.Database.GetExternalTable("ET");
             Assert.IsNotNull(et);
-            Assert.AreEqual("(x: long, y: string)", et.Display);
+            Assert.AreEqual("(x: long, y: string)", et.ToTestString());
         }
 
         [TestMethod]
@@ -727,7 +727,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".alter external table ET (x: long, y: string) kind=sql table=Customers ('connection')");
             var et = globals2.Database.GetExternalTable("ET");
             Assert.IsNotNull(et);
-            Assert.AreEqual("(x: long, y: string)", et.Display);
+            Assert.AreEqual("(x: long, y: string)", et.ToTestString());
         }
 
         [TestMethod]
@@ -738,7 +738,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".create-or-alter external table ET (x: long, y: string) kind=sql table=Customers ('connection')");
             var et = globals2.Database.GetExternalTable("ET");
             Assert.IsNotNull(et);
-            Assert.AreEqual("(x: long, y: string)", et.Display);
+            Assert.AreEqual("(x: long, y: string)", et.ToTestString());
         }
 
         [TestMethod]
@@ -760,7 +760,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".create materialized-view V on table T { T | extend z=1.0 }");
             var v = globals2.Database.GetMaterializedView("V");
             Assert.IsNotNull(v);
-            Assert.AreEqual("(x: long, y: string, z: real)", v.Display);
+            Assert.AreEqual("(x: long, y: string, z: real)", v.ToTestString());
         }
 
         [TestMethod]
@@ -773,7 +773,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".create materialized-view V on table T { T | extend z=1.0 }");
             var v = globals2.Database.GetMaterializedView("V");
             Assert.IsNotNull(v);
-            Assert.AreEqual("(x: long, y: string)", v.Display);
+            Assert.AreEqual("(x: long, y: string)", v.ToTestString());
         }
 
         [TestMethod]
@@ -809,7 +809,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".alter materialized-view V on table T { T | extend z=1.0 }");
             var v = globals2.Database.GetMaterializedView("V");
             Assert.IsNotNull(v);
-            Assert.AreEqual("(x: long, y: string, z: real)", v.Display);
+            Assert.AreEqual("(x: long, y: string, z: real)", v.ToTestString());
         }
 
         [TestMethod]
@@ -821,7 +821,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".create-or-alter materialized-view V on table T { T | extend z=1.0 }");
             var v = globals2.Database.GetMaterializedView("V");
             Assert.IsNotNull(v);
-            Assert.AreEqual("(x: long, y: string, z: real)", v.Display);
+            Assert.AreEqual("(x: long, y: string, z: real)", v.ToTestString());
         }
 
         [TestMethod]
@@ -834,7 +834,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".create-or-alter materialized-view V on table T { T | extend z=1.0 }");
             var v = globals2.Database.GetMaterializedView("V");
             Assert.IsNotNull(v);
-            Assert.AreEqual("(x: long, y: string, z: real)", v.Display);
+            Assert.AreEqual("(x: long, y: string, z: real)", v.ToTestString());
         }
 
         [TestMethod]
@@ -872,7 +872,7 @@ namespace Tests
             var globals2 = globals.ApplyCommand(".rename materialized-view V to Vee");
             var vee = globals2.Database.GetMaterializedView("Vee");
             Assert.IsNotNull(vee);
-            Assert.AreEqual("(a: long, b: long)", vee.Display);
+            Assert.AreEqual("(a: long, b: long)", vee.ToTestString());
         }
 
         [TestMethod]
@@ -898,11 +898,11 @@ namespace Tests
 
             var t = globals.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, y: string)", t.Display);
+            Assert.AreEqual("(x: long, y: string)", t.ToTestString());
 
             var t2 = globals.Database.GetTable("T2");
             Assert.IsNotNull(t2);
-            Assert.AreEqual("(x: long, y: string, z: real)", t2.Display);
+            Assert.AreEqual("(x: long, y: string, z: real)", t2.ToTestString());
         }
 
         [TestMethod]
@@ -911,7 +911,7 @@ namespace Tests
             var globals = _globals.ApplyCommand(".create table ['T'] (['x']: long, ['y']: string)");
             var t = globals.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, y: string)", t.Display);
+            Assert.AreEqual("(x: long, y: string)", t.ToTestString());
         }
 
         [TestMethod]
@@ -922,7 +922,7 @@ namespace Tests
                 .ApplyCommand(".alter table ['T'] (['x']: long, ['y']: string)");
             var t = globals.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, y: string)", t.Display);
+            Assert.AreEqual("(x: long, y: string)", t.ToTestString());
         }
 
         [TestMethod]
@@ -931,7 +931,7 @@ namespace Tests
             var globals = _globals.ApplyCommand(".create table 'T' (x: long, y: string)");
             var t = globals.Database.GetTable("T");
             Assert.IsNotNull(t);
-            Assert.AreEqual("(x: long, y: string)", t.Display);
+            Assert.AreEqual("(x: long, y: string)", t.ToTestString());
         }
     }
 }
