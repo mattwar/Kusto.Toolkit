@@ -8,7 +8,7 @@ The `ServerSymbolLoader` class loads symbols from a Kusto server using admin com
 ```csharp
 var connection = new KustoConnectionStringBuilder(...);
 var loader = new ServerSymbolLoader(connection);
-var names = loader.LoadDatabaseNamesAsync();
+var names = await loader.LoadDatabaseNamesAsync();
 ```
 
 #### Load database schema into a symbol
