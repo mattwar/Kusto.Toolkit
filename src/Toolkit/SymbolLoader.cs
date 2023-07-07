@@ -84,6 +84,51 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
+        /// Returns a <see cref="GlobalState"/> with the database loaded and added if it is not already defined within the original <see cref="GlobalState"/>,
+        /// otherwise returns the original <see cref="GlobalState"/>.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// </summary>
+        public Task<GlobalState> AddDatabaseAsync(GlobalState globals, string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            return AddDatabaseAsync(globals, databaseName, clusterName, asDefault: false, throwOnError, cancellationToken);
+        }
+
+        /// <summary>
+        /// Returns a <see cref="GlobalState"/> with the database loaded and added as the default database if it is not already defined within the original <see cref="GlobalState"/>,
+        /// otherwise returns a <see cref="GlobalState"/> with the already defined database set to default.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// </summary>
+        public Task<GlobalState> AddDefaultDatabaseAsync(GlobalState globals, string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            return AddDatabaseAsync(globals, databaseName, clusterName, asDefault: true, throwOnError, cancellationToken);
+        }
+
+        private async Task<GlobalState> AddDatabaseAsync(GlobalState globals, string databaseName, string clusterName, bool asDefault, bool throwOnError, CancellationToken cancellation)
+        {
+            if (string.IsNullOrEmpty(clusterName))
+            {
+                clusterName = this.DefaultCluster;
+            }
+
+            clusterName = GetFullHostName(clusterName, this.DefaultDomain);
+
+            var cluster = globals.GetCluster(clusterName);
+            var database = cluster?.GetDatabase(databaseName);
+            if (database == null)
+            {
+                return await AddOrUpdateDatabaseAsync(globals, databaseName, clusterName, asDefault, throwOnError, cancellation).ConfigureAwait(false);
+            }
+            else if (globals.Database != database)
+            {
+                return globals.WithCluster(cluster).WithDatabase(database);
+            }
+            else
+            {
+                return globals;
+            }
+        }
+
+        /// <summary>
         /// Adds or updates a cluster symbol of the specified name with open/empty database symbols for databases it does not already contain.
         /// If the cluster name is not specified, the loader's default cluster name is used.
         /// </summary>
@@ -95,7 +140,7 @@ namespace Kusto.Toolkit
         /// <summary>
         /// Adds or updates a cluster symbol of the specified name with open/empty database symbols for databases it does not already contain.
         /// If the cluster name is not specified, the loader's default cluster name is used.
-        /// Also makes the cluster the default cluster in the returned globals.
+        /// Also makes the cluster the default cluster in the returned <see cref="GlobalState"/>.
         /// </summary>
         public Task<GlobalState> AddOrUpdateDefaultClusterAsync(GlobalState globals, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
         {
@@ -141,6 +186,52 @@ namespace Kusto.Toolkit
 
             return globals;
         }
+
+        /// <summary>
+        /// Returns a <see cref="GlobalState"/> with the cluster loaded with empty database definitions, if it is not already defined within the original <see cref="GlobalState"/>,
+        /// otherwise returns the original <see cref="GlobalState"/>.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// </summary>
+        public Task<GlobalState> AddClusterAsync(GlobalState globals, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            return AddClusterAsync(globals, clusterName, asDefault: false, throwOnError, cancellationToken);
+        }
+
+        /// <summary>
+        /// Returns a <see cref="GlobalState"/> with the cluster loaded with empty database definitions and set to default, 
+        /// if it is not already defined within the original <see cref="GlobalState"/>,
+        /// otherwise returns the original <see cref="GlobalState"/> with the cluster set to default.
+        /// If the cluster name is not specified, the loader's default cluster name is used.
+        /// </summary>
+        public Task<GlobalState> AddDefaultClusterAsync(GlobalState globals, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        {
+            return AddClusterAsync(globals, clusterName, asDefault: true, throwOnError, cancellationToken);
+        }
+
+        private async Task<GlobalState> AddClusterAsync(GlobalState globals, string clusterName, bool asDefault, bool throwOnError, CancellationToken cancellationToken)
+        {
+            if (clusterName == null)
+            {
+                clusterName = this.DefaultCluster;
+            }
+
+            clusterName = GetFullHostName(clusterName, this.DefaultDomain);
+            var cluster = globals.GetCluster(clusterName);
+
+            if (cluster == null)
+            {
+                return await this.AddOrUpdateClusterAsync(globals, clusterName, asDefault, throwOnError, cancellationToken).ConfigureAwait(false);
+            }
+            else if (asDefault && globals.Cluster != cluster)
+            {
+                return globals.WithCluster(cluster);
+            }
+            else
+            {
+                return globals;
+            }
+        }
+
 
         public virtual void Dispose() { }
     }
