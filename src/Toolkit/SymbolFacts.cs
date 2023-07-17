@@ -22,12 +22,6 @@ namespace Kusto.Toolkit
         {
             switch (clrTypeName)
             {
-                case "System.Byte":
-                case "Byte":
-                case "byte":
-                case "System.SByte":
-                case "SByte":
-                case "sbyte":
                 case "System.Int16":
                 case "Int16":
                 case "short":
@@ -77,6 +71,12 @@ namespace Kusto.Toolkit
                 case "System.Boolean":
                 case "Boolean":
                 case "bool":
+                case "System.SByte": // bytes and sbytes are understood as bools by Kusto
+                case "SByte":
+                case "sbyte":
+                case "System.Byte":
+                case "Byte":
+                case "byte":
                     return ScalarTypes.Bool;
                 case "System.Object":
                 case "Object":
