@@ -7,6 +7,7 @@ using Kusto.Language.Symbols;
 using Kusto.Data.Common;
 using System.ComponentModel;
 
+
 #nullable disable // some day...
 
 namespace Kusto.Toolkit
@@ -58,7 +59,6 @@ namespace Kusto.Toolkit
         }
 
         public override string DefaultDomain => _defaultDomain;
-
         public override string DefaultCluster => _defaultClusterName;
 
         /// <summary>
@@ -170,19 +170,11 @@ namespace Kusto.Toolkit
                 return null;
             }
 
-            databaseName = dbInfo.DatabaseName;
-
-            var tables = await LoadTablesAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            if (tables == null)
-            {
-                AddBadDatabasename(clusterName, databaseName);
-                return null;
-            }
-
-            var externalTables = await LoadExternalTablesAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            var materializedViews = await LoadMaterializedViewsAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            var functions = await LoadFunctionsAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            var entityGroups = await LoadEntityGroupsAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var tables = await LoadTablesAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var externalTables = await LoadExternalTablesAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var materializedViews = await LoadMaterializedViewsAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var functions = await LoadFunctionsAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var entityGroups = await LoadEntityGroupsAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
 
             var members = new List<Symbol>();
             members.AddRange(tables);
@@ -197,26 +189,17 @@ namespace Kusto.Toolkit
 
         private async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
-            var tables = new List<TableSymbol>();
-
-            // get table schema from .show database xxx schema
-            var databaseSchemas = await ExecuteControlCommandAsync<ShowDatabaseSchemaResult>(
+            // get table schema from .show database xxx cslschema
+            var tableSchemas = await ExecuteControlCommandAsync<ShowDatabaseCslSchemaResult>(
                 provider, databaseName,
-                $".show database {KustoFacts.GetBracketedName(databaseName)} schema", 
+                $".show database {KustoFacts.GetBracketedName(databaseName)} cslschema",
                 throwOnError, cancellationToken)
                 .ConfigureAwait(false);
-            if (databaseSchemas == null)
+
+            if (tableSchemas == null)
                 return null;
 
-            foreach (var table in databaseSchemas.Where(s => !string.IsNullOrEmpty(s.TableName)).GroupBy(s => s.TableName))
-            {
-                var tableDocString = table.FirstOrDefault(t => string.IsNullOrEmpty(t.ColumnName) && !string.IsNullOrEmpty(t.DocString))?.DocString;
-                var columnSchemas = table.Where(t => !string.IsNullOrEmpty(t.ColumnName)).ToArray();
-                var columns = columnSchemas.Select(s => new ColumnSymbol(s.ColumnName, GetKustoType(s.ColumnType), s.DocString)).ToList();
-                var tableSymbol = new TableSymbol(table.Key, columns, tableDocString);
-                tables.Add(tableSymbol);
-            }
-
+            var tables = tableSchemas.Select(schema => new TableSymbol(schema.TableName, "(" + schema.Schema + ")", schema.DocString)).ToList();
             return tables;
         }
 
@@ -230,11 +213,12 @@ namespace Kusto.Toolkit
             {
                 foreach (var et in externalTables)
                 {
-                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableSchemaResult>(
+                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableCslSchemaResult>(
                         provider, databaseName,
                         $".show external table {KustoFacts.GetBracketedName(et.TableName)} cslschema",
                         throwOnError, cancellationToken)
                         .ConfigureAwait(false);
+
                     if (etSchemas != null && etSchemas.Length > 0)
                     {
                         var mvSymbol = new ExternalTableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString);
@@ -254,7 +238,8 @@ namespace Kusto.Toolkit
             var materializedViews = await ExecuteControlCommandAsync<ShowMaterializedViewsResult>(
                 provider, databaseName, 
                 ".show materialized-views", 
-                throwOnError, cancellationToken); ;
+                throwOnError, cancellationToken);
+
             if (materializedViews != null)
             {
                 foreach (var mv in materializedViews)
@@ -264,6 +249,7 @@ namespace Kusto.Toolkit
                         $".show materialized-view {KustoFacts.GetBracketedName(mv.Name)} cslschema", 
                         throwOnError, cancellationToken)
                         .ConfigureAwait(false);
+
                     if (mvSchemas != null && mvSchemas.Length > 0)
                     {
                         var mvSymbol = new MaterializedViewSymbol(mv.Name, "(" + mvSchemas[0].Schema + ")", mv.Query, mv.DocString);
@@ -386,16 +372,11 @@ namespace Kusto.Toolkit
             public string InTransitionTo;
         }
 
-        public class ShowDatabaseSchemaResult
+        public class ShowDatabaseCslSchemaResult
         {
             public string DatabaseName;
             public string TableName;
-            public string ColumnName;
-            public string ColumnType;
-            public bool IsDefaultTable;
-            public bool IsDefaultColumn;
-            public string PrettyName;
-            public string Version;
+            public string Schema;
             public string Folder;
             public string DocString;
         }
@@ -406,7 +387,7 @@ namespace Kusto.Toolkit
             public string DocString;
         }
 
-        public class ShowExternalTableSchemaResult
+        public class ShowExternalTableCslSchemaResult
         {
             public string TableName;
             public string Schema;
