@@ -126,7 +126,7 @@ namespace Kusto.Toolkit
 
         /// <summary>
         /// Gets the text for a parameter type/schema declaration as it would be represented a kusto query.
-        /// /// </summary>
+        /// </summary>
         public static string GetFunctionParameterType(Parameter p)
         {
             switch (p.TypeKind)
