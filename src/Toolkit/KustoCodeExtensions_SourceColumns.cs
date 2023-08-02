@@ -149,6 +149,16 @@ namespace Kusto.Toolkit
                         }
                     }
                 },
+                fnAfter: n =>
+                {
+                    if (n.Alternates != null)
+                    {
+                        foreach (var alt in n.Alternates)
+                        {
+                            GatherSourceColumnsFromSyntax(alt, globals, columnSet, columnList);
+                        }
+                    }
+                },
                 // don't look inside function declarations, we already do this when we recurse into called function bodies.
                 fnDescend: n => !(n is FunctionDeclaration)
                 );

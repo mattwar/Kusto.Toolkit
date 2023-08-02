@@ -14,13 +14,16 @@ namespace Tests
         [TestMethod]
         public void TestGetDatabaseTables()
         {
-            var globals = GetGlobals(
-                new DatabaseSymbol("db1",
-                    new TableSymbol("Tab11", "(x: long)"),
-                    new TableSymbol("Tab12", "(y: string)")),
-                new DatabaseSymbol("db2",
-                    new TableSymbol("Tab21", "(x: long)"),
-                    new TableSymbol("Tab22", "(y: string)")));
+            var globals = GlobalState.Default
+                .WithCluster(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("Tab11", "(x: long)"),
+                            new TableSymbol("Tab12", "(y: string)")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("Tab21", "(x: long)"),
+                            new TableSymbol("Tab22", "(y: string)"))))
+                .WithDatabase("db1");
 
             TestGetDatabaseTables("Tab11", "db1.Tab11", globals);
             TestGetDatabaseTables("Tab12", "db1.Tab12", globals);
@@ -32,19 +35,58 @@ namespace Tests
         }
 
         [TestMethod]
+        public void TestGetDatabaseTables_macro_expand()
+        {
+            var globals = GlobalState.Default
+                .WithClusterList(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db",
+                            new EntityGroupSymbol("ClusterGroup", "[cluster('cluster1'), cluster('cluster2')]")
+                            )),
+                    new ClusterSymbol("cluster1",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("Tab11", "(x: long)"),
+                            new TableSymbol("Tab12", "(y: string)")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("Tab21", "(x: long)"),
+                            new TableSymbol("Tab22", "(y: string)"))),
+                    new ClusterSymbol("cluster2",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("Tab11", "(x: long)"),
+                            new TableSymbol("Tab12", "(y: string)")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("Tab21", "(x: long)"),
+                            new TableSymbol("Tab22", "(y: string)")))
+                    )
+                .WithCluster("cluster")
+                .WithDatabase("db");
+
+            TestGetDatabaseTables("macro-expand ClusterGroup as scope (scope.database('db1').Tab11)", "cluster1.db1.Tab11, cluster2.db1.Tab11", globals);
+            TestGetDatabaseTables("macro-expand ClusterGroup as scope (scope.database('db1').Tab12)", "cluster1.db1.Tab12, cluster2.db1.Tab12", globals);
+            TestGetDatabaseTables("macro-expand ClusterGroup as scope (scope.database('db2').Tab21)", "cluster1.db2.Tab21, cluster2.db2.Tab21", globals);
+            TestGetDatabaseTables("macro-expand ClusterGroup as scope (scope.database('db2').Tab22)", "cluster1.db2.Tab22, cluster2.db2.Tab22", globals);
+            TestGetDatabaseTables("macro-expand ClusterGroup as scope (scope.database('db1').Tab11 | union scope.database('db1').Tab12)", "cluster1.db1.Tab11, cluster1.db1.Tab12, cluster2.db1.Tab11, cluster2.db1.Tab12", globals);
+            TestGetDatabaseTables("macro-expand ClusterGroup as scope (scope.database('db1').Tab11 | union scope.database('db2').Tab22)", "cluster1.db1.Tab11, cluster1.db2.Tab22, cluster2.db1.Tab11, cluster2.db2.Tab22", globals);
+            TestGetDatabaseTables("macro-expand ClusterGroup as scope (union scope.database('db1').Tab*)", "cluster1.db1.Tab11, cluster1.db1.Tab12, cluster2.db1.Tab11, cluster2.db1.Tab12", globals);
+        }
+
+        [TestMethod]
         public void TestGetDatabaseTables_functions()
         {
-            var globals = GetGlobals(
-                new DatabaseSymbol("db1",
-                    new TableSymbol("Tab11", "(x: long)"),
-                    new TableSymbol("Tab12", "(y: string)"),
-                    new FunctionSymbol("Fn_11_21", "()", "{ Tab11 | union database('db2').Tab21 }"),
-                    new FunctionSymbol("Fn_11_22_12", "()", "{ Tab11 | union database('db2').Fn_22_12 }")),
-                new DatabaseSymbol("db2",
-                    new TableSymbol("Tab21", "(x: long)"),
-                    new TableSymbol("Tab22", "(y: string)"),
-                    new FunctionSymbol("Fn_22_12", "()", "{ Tab22 | union database('db1').Tab12 }"),
-                    new FunctionSymbol("Fn_21_11_22_12", "()", "{ Tab21 | union database('db1').Fn_11_22_12 }")));
+            var globals = GlobalState.Default
+                .WithCluster(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("Tab11", "(x: long)"),
+                            new TableSymbol("Tab12", "(y: string)"),
+                            new FunctionSymbol("Fn_11_21", "()", "{ Tab11 | union database('db2').Tab21 }"),
+                            new FunctionSymbol("Fn_11_22_12", "()", "{ Tab11 | union database('db2').Fn_22_12 }")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("Tab21", "(x: long)"),
+                            new TableSymbol("Tab22", "(y: string)"),
+                            new FunctionSymbol("Fn_22_12", "()", "{ Tab22 | union database('db1').Tab12 }"),
+                            new FunctionSymbol("Fn_21_11_22_12", "()", "{ Tab21 | union database('db1').Fn_11_22_12 }"))))
+                .WithDatabase("db1");
 
             TestGetDatabaseTables("Fn_11_21", "db1.Tab11, db2.Tab21", globals);
             TestGetDatabaseTables("Fn_11_22_12", "db1.Tab11, db2.Tab22, db1.Tab12", globals);
@@ -76,13 +118,16 @@ namespace Tests
         [TestMethod]
         public void TestGetDatabaseTableColumns()
         {
-            var globals = GetGlobals(
-                new DatabaseSymbol("db1",
-                    new TableSymbol("Tab11", "(x: long, y: string)"),
-                    new TableSymbol("Tab12", "(a: long, b: real)")),
-                new DatabaseSymbol("db2",
-                    new TableSymbol("Tab21", "(x: long, y: string)"),
-                    new TableSymbol("Tab22", "(a: long, b: string)")));
+            var globals = GlobalState.Default
+                .WithCluster(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("Tab11", "(x: long, y: string)"),
+                            new TableSymbol("Tab12", "(a: long, b: real)")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("Tab21", "(x: long, y: string)"),
+                            new TableSymbol("Tab22", "(a: long, b: string)"))))
+                .WithDatabase("db1");
 
             TestGetDatabaseTableColumns("Tab11", "", globals);
             TestGetDatabaseTableColumns("Tab11 | where x > 10", "Tab11.x", globals);
@@ -91,19 +136,50 @@ namespace Tests
         }
 
         [TestMethod]
+        public void TestGetDatabaseTableColumns_macro_expand()
+        {
+            var globals = GlobalState.Default
+                .WithClusterList(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db",
+                            new EntityGroupSymbol("ClusterGroup", "[cluster('cluster1'), cluster('cluster2')]"),
+                            new EntityGroupSymbol("DbGroup", "[cluster('cluster1').database('db1'), cluster('cluster1').database('db2'), cluster('cluster2').database('db1'), cluster('cluster2').database('db2')]")
+                            )),
+                    new ClusterSymbol("cluster1",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("T", "(x: long, y: string)")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("T", "(x: long, y: string)"))),
+                    new ClusterSymbol("cluster2",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("T", "(x: long, y: string)")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("T", "(x: long, y: string)")))
+                    )
+                .WithCluster("cluster")
+                .WithDatabase("db");
+
+            TestGetDatabaseTableColumns("macro-expand ClusterGroup as scope (scope.database('db1').T | project x)", "cluster1.db1.T.x, cluster2.db1.T.x", globals);
+            TestGetDatabaseTableColumns("macro-expand DbGroup as scope (scope.T | project x)", "cluster1.db1.T.x, cluster1.db2.T.x, cluster2.db1.T.x, cluster2.db2.T.x", globals);
+        }
+
+        [TestMethod]
         public void TestGetDatabaseTableColumns_functions()
         {
-            var globals = GetGlobals(
-                new DatabaseSymbol("db1",
-                    new TableSymbol("Tab11", "(x: long, y: string)"),
-                    new TableSymbol("Tab12", "(a: long, b: real)"),
-                    new FunctionSymbol("Fn_11_21", "()", "{ Tab11 | union database('db2').Tab21 | where x > 10 }"),
-                    new FunctionSymbol("Fn_11_22_12", "()", "{ Tab11 | union database('db2').Fn_22_12 | where x > a }")),
-                new DatabaseSymbol("db2",
-                    new TableSymbol("Tab21", "(x: long, y: string)"),
-                    new TableSymbol("Tab22", "(a: long, y: real)"),
-                    new FunctionSymbol("Fn_22_12", "()", "{ Tab22 | union database('db1').Tab12 | where a > 10 }"),
-                    new FunctionSymbol("Fn_21_11_22_12", "()", "{ Tab21 | union database('db1').Fn_11_22_12 | where x > a }")));
+            var globals = GlobalState.Default
+                .WithCluster(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("Tab11", "(x: long, y: string)"),
+                            new TableSymbol("Tab12", "(a: long, b: real)"),
+                            new FunctionSymbol("Fn_11_21", "()", "{ Tab11 | union database('db2').Tab21 | where x > 10 }"),
+                            new FunctionSymbol("Fn_11_22_12", "()", "{ Tab11 | union database('db2').Fn_22_12 | where x > a }")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("Tab21", "(x: long, y: string)"),
+                            new TableSymbol("Tab22", "(a: long, y: real)"),
+                            new FunctionSymbol("Fn_22_12", "()", "{ Tab22 | union database('db1').Tab12 | where a > 10 }"),
+                            new FunctionSymbol("Fn_21_11_22_12", "()", "{ Tab21 | union database('db1').Fn_11_22_12 | where x > a }"))))
+                .WithDatabase("db1");
 
             TestGetDatabaseTableColumns("Fn_11_21", "db1.Tab11.x, db2.Tab21.x", globals);
             TestGetDatabaseTableColumns("Fn_11_22_12", "db2.Tab22.a, db1.Tab12.a, db1.Tab11.x", globals);
@@ -119,18 +195,70 @@ namespace Tests
         [TestMethod]
         public void TestGetDatabaseTableColumnsInResult()
         {
-            var globals = GetGlobals(
-                new DatabaseSymbol("db1",
-                    new TableSymbol("Tab11", "(x: long, y: string)"),
-                    new TableSymbol("Tab12", "(a: long, b: real)")),
-                new DatabaseSymbol("db2",
-                    new TableSymbol("Tab21", "(x: long, y: string)"),
-                    new TableSymbol("Tab22", "(a: long, y: real)")));
+            var globals = GlobalState.Default
+                .WithCluster(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("Tab11", "(x: long, y: string)"),
+                            new TableSymbol("Tab12", "(a: long, b: real)")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("Tab21", "(x: long, y: string)"),
+                            new TableSymbol("Tab22", "(a: long, y: real)"))))
+                .WithDatabase("db1");
 
             TestGetDatabaseTableColumnsInResult("Tab11", "Tab11.x, Tab11.y", globals);
             TestGetDatabaseTableColumnsInResult("Tab11 | union Tab12", "Tab11.x, Tab11.y, Tab12.a, Tab12.b", globals);
             TestGetDatabaseTableColumnsInResult("Tab11 | project x", "Tab11.x", globals);
             TestGetDatabaseTableColumnsInResult("Tab11 | project Q=x", "", globals);
+        }
+
+        [TestMethod]
+        public void TestGetDatabaseTableColumnsInResult_macro_expand()
+        {
+            var globals = GlobalState.Default
+                .WithClusterList(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db",
+                            new EntityGroupSymbol("Db1Group", "[cluster('cluster1').database('db1'), cluster('cluster2').database('db1')]")
+                            )),
+                    new ClusterSymbol("cluster1",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("Tab11", "(x: long, y: string)"),
+                            new TableSymbol("Tab12", "(a: long, b: real)")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("Tab21", "(x: long, y: string)"),
+                            new TableSymbol("Tab22", "(a: long, y: real)"))),
+                    new ClusterSymbol("cluster2",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("Tab11", "(x: long, y: string)"),
+                            new TableSymbol("Tab12", "(a: long, b: real)")),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("Tab21", "(x: long, y: string)"),
+                            new TableSymbol("Tab22", "(a: long, y: real)")))
+                    )
+                .WithCluster("cluster")
+                .WithDatabase("db");
+
+            TestGetDatabaseTableColumnsInResult(
+                "macro-expand Db1Group as scope (scope.Tab11)", 
+                "cluster1.db1.Tab11.x, cluster1.db1.Tab11.y, cluster2.db1.Tab11.x, cluster2.db1.Tab11.y", 
+                globals);
+
+            TestGetDatabaseTableColumnsInResult(
+                "macro-expand Db1Group as scope (scope.Tab11 | union scope.Tab12)", 
+                "cluster1.db1.Tab11.x, cluster1.db1.Tab11.y, cluster1.db1.Tab12.a, cluster1.db1.Tab12.b, " +
+                "cluster2.db1.Tab11.x, cluster2.db1.Tab11.y, cluster2.db1.Tab12.a, cluster2.db1.Tab12.b", 
+                globals);
+            
+            TestGetDatabaseTableColumnsInResult(
+                "macro-expand Db1Group as scope (scope.Tab11 | project x)", 
+                "cluster1.db1.Tab11.x, cluster2.db1.Tab11.x", 
+                globals);
+
+            TestGetDatabaseTableColumnsInResult(
+                "macro-expand Db1Group as scope (scope.Tab11 | project Q=x)", 
+                "", 
+                globals);
         }
 
         private static void TestGetDatabaseTableColumnsInResult(string query, string columnNames, GlobalState globals)
@@ -141,12 +269,15 @@ namespace Tests
         [TestMethod]
         public void TestGetSourceColumns()
         {
-            var globals = GetGlobals(
-                new DatabaseSymbol("db1",
-                    new TableSymbol("TabXY", "(x: long, y: string)"),
-                    new TableSymbol("TabXZ", "(x: long, z: real)"),
-                    new FunctionSymbol("FnQ", "()", "{ TabXY | project Q=x }"),
-                    new FunctionSymbol("FnPQ", "()", "{ FnQ | project P=Q }")));
+            var globals = GlobalState.Default
+                .WithCluster(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("TabXY", "(x: long, y: string)"),
+                            new TableSymbol("TabXZ", "(x: long, z: real)"),
+                            new FunctionSymbol("FnQ", "()", "{ TabXY | project Q=x }"),
+                            new FunctionSymbol("FnPQ", "()", "{ FnQ | project P=Q }"))))
+                .WithDatabase("db1");
 
             // table's columns are their own source
             TestGetSourceColumns("TabXY", "TabXY.x, TabXY.y", globals);
@@ -187,6 +318,126 @@ namespace Tests
             // columns passed as arguments can be tracked
             TestGetSourceColumns("let fn=(text: string) { text }; TabXY | project fn(y)", "Column1", "TabXY.y", globals);
             TestGetSourceColumns("let fn=(text: string) { text }; TabXY | project Q=fn(y)", "Q", "TabXY.y", globals);
+        }
+
+
+        [TestMethod]
+        public void TestGetSourceColumns_macro_expand()
+        {
+            var globals = GlobalState.Default
+                .WithClusterList(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db",
+                            new EntityGroupSymbol("Db1Group", "[cluster('cluster1').database('db1'), cluster('cluster2').database('db1')]"))),
+                    new ClusterSymbol("cluster1",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("TabXY", "(x: long, y: string)"),
+                            new TableSymbol("TabXZ", "(x: long, z: real)"),
+                            new FunctionSymbol("FnQ", "()", "{ TabXY | project Q=x }"),
+                            new FunctionSymbol("FnPQ", "()", "{ FnQ | project P=Q }"))),
+                    new ClusterSymbol("cluster2",
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("TabXY", "(x: long, y: string)"),
+                            new TableSymbol("TabXZ", "(x: long, z: real)"),
+                            new FunctionSymbol("FnQ", "()", "{ TabXY | project Q=x }"),
+                            new FunctionSymbol("FnPQ", "()", "{ FnQ | project P=Q }")))
+                    )
+                .WithCluster("cluster")
+                .WithDatabase("db");
+
+            // table's columns are their own source
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY)", 
+                "cluster1.db1.TabXY.x, cluster1.db1.TabXY.y, cluster2.db1.TabXY.x, cluster2.db1.TabXY.y",
+                globals);
+
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY)", 
+                "x", 
+                "cluster1.db1.TabXY.x, cluster2.db1.TabXY.x",
+                globals);
+
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY)", 
+                "y", 
+                "cluster1.db1.TabXY.y, cluster2.db1.TabXY.y",
+                globals);
+
+            // projected table column is its own source
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | project x)", 
+                "x", 
+                "cluster1.db1.TabXY.x, cluster2.db1.TabXY.x", 
+                globals);
+
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | project x, y)", 
+                "x", 
+                "cluster1.db1.TabXY.x, cluster2.db1.TabXY.x", 
+                globals);
+
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | project x, y)", 
+                "y", 
+                "cluster1.db1.TabXY.y, cluster2.db1.TabXY.y", 
+                globals);
+
+            // projected and renamed column can be tracked back to its source
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | project Q=x)", 
+                "Q", 
+                "cluster1.db1.TabXY.x, cluster2.db1.TabXY.x", 
+                globals);
+
+            // unioned and renamed columns can be tracked back to their source
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | union scope.TabXZ | project x)", 
+                "x",
+                "cluster1.db1.TabXY.x, cluster1.db1.TabXZ.x, cluster2.db1.TabXY.x, cluster2.db1.TabXZ.x", 
+                globals);
+
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | union scope.TabXZ | project Q=x)", 
+                "Q",
+                "cluster1.db1.TabXY.x, cluster1.db1.TabXZ.x, cluster2.db1.TabXY.x, cluster2.db1.TabXZ.x", 
+                globals);
+
+            // joined columns can be tracked back to their source
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | join scope.TabXZ on x | project Q=x)", 
+                "Q", 
+                "cluster1.db1.TabXY.x, cluster2.db1.TabXY.x", 
+                globals);
+
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | join scope.TabXZ on x | project x1)", 
+                "x1", 
+                "cluster1.db1.TabXZ.x, cluster2.db1.TabXZ.x", 
+                globals);
+
+            // columns generated by aggregates can be tracked back to their source
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | summarize max(x), min(x))", "max_x", 
+                "cluster1.db1.TabXY.x, cluster2.db1.TabXY.x", 
+                globals);
+
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.TabXY | summarize min(Q=x))", 
+                "cluster1.db1.TabXY.x, cluster2.db1.TabXY.x", 
+                globals);
+
+            // columns referenced and renamed inside functions can be tracked back to their source
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.FnQ)", 
+                "Q", 
+                "cluster1.db1.TabXY.x, cluster2.db1.TabXY.x", 
+                globals);
+
+            TestGetSourceColumns(
+                "macro-expand Db1Group as scope (scope.FnPQ)", 
+                "P", 
+                "cluster1.db1.TabXY.x, cluster2.db1.TabXY.x", 
+                globals);
         }
 
         private static void TestGetSourceColumns(string query, string outputColumnName, string expectedSourceColumnNames, GlobalState globals)
@@ -238,17 +489,42 @@ namespace Tests
         [TestMethod]
         public void TestGetDatabaseFunctions()
         {
-            var globals = GetGlobals(
-                new DatabaseSymbol("db",
-                    new TableSymbol("T", "(x: long, y: string)"),
-                    new FunctionSymbol("Fn1", "(a: long)", "{ T | where x == a }"),
-                    new FunctionSymbol("Fn2", "(b: string)", "{ T | where y == b }"),
-                    new FunctionSymbol("Fn3", "()", "{ Fn2('bbb') }")
-                    ));
+            var globals = GlobalState.Default
+                .WithCluster(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db",
+                            new TableSymbol("T", "(x: long, y: string)"),
+                            new FunctionSymbol("Fn1", "(a: long)", "{ T | where x == a }"),
+                            new FunctionSymbol("Fn2", "(b: string)", "{ T | where y == b }"),
+                            new FunctionSymbol("Fn3", "()", "{ Fn2('bbb') }")
+                            )))
+                .WithDatabase("db");
 
             TestGetStoredFunctions("Fn1(10)", "db.Fn1", globals);
-            //TestGetDatabaseFunctions("Fn2('bbb')", "db.Fn2", globals);
-            //TestGetDatabaseFunctions("Fn3()", "db.Fn2, db.Fn3", globals);
+            TestGetStoredFunctions("Fn2('bbb')", "db.Fn2", globals);
+            TestGetStoredFunctions("Fn3()", "db.Fn2, db.Fn3", globals);
+        }
+
+        [TestMethod]
+        public void TestGetDatabaseFunctions_macro_expand()
+        {
+            var globals = GlobalState.Default
+                .WithCluster(
+                    new ClusterSymbol("cluster",
+                        new DatabaseSymbol("db",
+                            new EntityGroupSymbol("DbGroup", "[database('db1'), database('db2')]")
+                            ),
+                        new DatabaseSymbol("db1",
+                            new TableSymbol("T", "(x: long, y: string)"),
+                            new FunctionSymbol("Fn", "(a: long)", "{ T | where x == a }")
+                            ),
+                        new DatabaseSymbol("db2",
+                            new TableSymbol("T", "(x: long, y: string)"),
+                            new FunctionSymbol("Fn", "(a: long)", "{ T | where x == a }")
+                            )))
+                .WithDatabase("db");
+
+            TestGetStoredFunctions("macro-expand DbGroup as scope (scope.Fn(10))", "db1.Fn, db2.Fn", globals);
         }
 
         private static void TestGetStoredFunctions(string query, string functionNames, GlobalState globals)
@@ -274,19 +550,6 @@ namespace Tests
 
 
         #region Test Helpers
-        private static GlobalState GetGlobals(params ClusterSymbol[] clusters)
-        {
-            return GlobalState.Default
-                .WithClusterList(clusters)
-                .WithCluster(clusters[0])
-                .WithDatabase(clusters[0].Databases[0]);
-        }
-
-        private static GlobalState GetGlobals(params DatabaseSymbol[] databases)
-        {
-            return GetGlobals(new ClusterSymbol("cluster", databases));
-        }
-
         private static TableSymbol[] GetTables(string tableNames, GlobalState globals)
         {
             var qualifiedNames = ParseQualifiedNames(tableNames);
@@ -467,7 +730,7 @@ namespace Tests
                 switch (parts.Length)
                 {
                     case 4:
-                        return new QualifiedName(parts[0], parts[1], parts[2], parts[2]);
+                        return new QualifiedName(parts[0], parts[1], parts[2], parts[3]);
                     case 3:
                         return new QualifiedName(null, parts[0], parts[1], parts[2]);
                     case 2:

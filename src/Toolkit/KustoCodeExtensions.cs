@@ -83,6 +83,16 @@ namespace Kusto.Toolkit
                             GatherMembers(body);
                         }
                     },
+                    fnAfter: n =>
+                    {
+                        if (n.Alternates != null)
+                        {
+                            foreach (var alt in n.Alternates)
+                            {
+                                GatherMembers(alt);
+                            }
+                        }
+                    },
                     fnDescend: n =>
                         // skip descending into function declarations since their bodies will be examined by the code above
                         !(n is FunctionDeclaration)
@@ -159,6 +169,16 @@ namespace Kusto.Toolkit
                         if (n.GetCalledFunctionBody() is SyntaxNode body)
                         {
                             GatherColumns(body);
+                        }
+                    },
+                    fnAfter: n =>
+                    {
+                        if (n.Alternates != null)
+                        {
+                            foreach (var alt in n.Alternates)
+                            {
+                                GatherColumns(alt);
+                            }
                         }
                     },
                     fnDescend: n =>
@@ -239,6 +259,16 @@ namespace Kusto.Toolkit
                         if (n.GetCalledFunctionBody() is SyntaxNode body)
                         {
                             GatherColumns(body);
+                        }
+                    },
+                    fnAfter: n =>
+                    {
+                        if (n.Alternates != null)
+                        {
+                            foreach (var alt in n.Alternates)
+                            {
+                                GatherColumns(alt);
+                            }
                         }
                     },
                     fnDescend: n =>
