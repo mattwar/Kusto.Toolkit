@@ -374,9 +374,9 @@ namespace Kusto.Toolkit
 
         public class ShowDatabaseCslSchemaResult
         {
-            public string DatabaseName;
             public string TableName;
             public string Schema;
+            public string DatabaseName;
             public string Folder;
             public string DocString;
         }

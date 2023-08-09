@@ -72,12 +72,37 @@
     },
     {
       "Name": "OccupancyDetection",
-      "Schema": "(Timestamp: datetime, Temperature: real, Humidity: real, Light: real, CO2: real, HumidityRatio: real, Occupancy: int, Test: int)"
+      "Schema": "(Timestamp: datetime, Temperature: real, Humidity: real, Light: real, CO2: real, HumidityRatio: real, Occupancy: bool, Test: bool)"
     },
     {
       "Name": "SamplePowerRequirementHistorizedData",
       "Schema": "(timestamp: datetime, twinId: string, modelId: string, name: string, value: real, relationshipTarget: dynamic, relationshipId: dynamic)",
       "Description": "Contains historized property values over a one month period"
+    },
+    {
+      "Name": "GeoRegions",
+      "Schema": "(countyName: string, _count: int, timestamp: datetime)"
+    },
+    {
+      "Name": "FHV_Trips",
+      "Schema": "(Dispatching_base_num: string, pickup_datetime: datetime, dropoff_datetime: datetime, Pickup_location_ID: int, Dropoff_location_ID: int, Shared_Ride_Flag: bool)"
+    },
+    {
+      "Name": "nyc_taxi",
+      "Schema": "(vendor_id: string, pickup_datetime: datetime, dropoff_datetime: datetime, passenger_count: int, trip_distance: real, pickup_longitude: real, pickup_latitude: real, rate_code: string, store_and_fwd_flag: string, dropoff_longitude: real, dropoff_latitude: real, payment_type: string, fare_amount: real, surcharge: real, mta_tax: real, tip_amount: real, tolls_amount: real, total_amount: real)",
+      "Description": "2014 Yellow Taxi Trip Data"
+    },
+    {
+      "Name": "Trips",
+      "Schema": "(trip_id: long, vendor_id: string, pickup_datetime: datetime, dropoff_datetime: datetime, store_and_fwd_flag: string, rate_code_id: int, pickup_longitude: real, pickup_latitude: real, dropoff_longitude: real, dropoff_latitude: real, passenger_count: int, trip_distance: real, fare_amount: real, extra: real, mta_tax: real, tip_amount: real, tolls_amount: real, ehail_fee: real, improvement_surcharge: real, total_amount: real, payment_type: string, trip_type: int, pickup: string, dropoff: string, cab_type: string, precipitation: int, snow_depth: int, snowfall: int, max_temperature: int, min_temperature: int, average_wind_speed: int, pickup_nyct2010_gid: int, pickup_ctlabel: string, pickup_borocode: int, pickup_boroname: string, pickup_ct2010: string, pickup_boroct2010: string, pickup_cdeligibil: string, pickup_ntacode: string, pickup_ntaname: string, pickup_puma: string, dropoff_nyct2010_gid: int, dropoff_ctlabel: string, dropoff_borocode: int, dropoff_boroname: string, dropoff_ct2010: string, dropoff_boroct2010: string, dropoff_cdeligibil: string, dropoff_ntacode: string, dropoff_ntaname: string, dropoff_puma: string)"
+    },
+    {
+      "Name": "Iris",
+      "Schema": "(SepalLength: real, SepalWidth: real, PetalLength: real, PetalWidth: real, Class: string)"
+    },
+    {
+      "Name": "PlotlyTemplate",
+      "Schema": "(name: string, plotly: string)"
     }
   ],
   "ExternalTables": [
@@ -288,6 +313,36 @@
       "Name": "EventsByStates",
       "Parameters": "(EventTypeParam: dynamic)",
       "Body": "{  \r\n    StormEvents\r\n   | where (\"__SelectAll__\" in(EventTypeParam)) or (EventType in (EventTypeParam))\r\n   | summarize Events=count() by EventType,State\r\n}"
+    },
+    {
+      "Name": "dkmeans_centroids_fl",
+      "Parameters": "(tbl: (*), k: int, weight_col: string)",
+      "Body": "{\r\nlet args1 = pack('k', k, 'weight_col', weight_col);     //  for the 1st clustering, we can cluster to more than needed\r\nlet args2 = pack('k', k, 'weight_col', 'num');          //  for the 2nd clustering\r\nlet code = ```if 1:\r\n    \r\n    def KMeans_clustering(k, features, weights=None):\r\n        from sklearn.cluster import KMeans, MiniBatchKMeans\r\n        km = MiniBatchKMeans(n_clusters=k) if features.shape[0] > 1000 else KMeans(n_clusters=k)\r\n        km.fit(features, sample_weight=weights)\r\n        centroids = pd.DataFrame(km.cluster_centers_, columns=features.columns)\r\n        centroids.insert(features.shape[1], \"num\", pd.DataFrame(km.labels_, columns=[\"n\"]).groupby(\"n\").size())\r\n        if weights is not None:\r\n            centroids[\"num\"] = pd.concat([pd.DataFrame(km.labels_, columns=[\"cluster_id\"]), weights], axis=1).groupby(\"cluster_id\").sum()\r\n        centroids.insert(features.shape[1], \"cluster_id\", range(k))\r\n        return centroids, km.labels_\r\n    \r\n    k = kargs[\"k\"]\r\n    weight_col = kargs[\"weight_col\"]\r\n    \r\n    if weight_col == \"\":\r\n       result, labels = KMeans_clustering(k, df)\r\n    else:\r\n       result, labels = KMeans_clustering(k, df.drop(weight_col, axis=1), df[weight_col])\r\n    ```;\r\ntbl\r\n    | evaluate hint.distribution=per_node python(typeof(*, num:long), code, args1)\r\n    | evaluate python(typeof(*), code, args2)\r\n}",
+      "Description": "Distributed K-Means clustering returning the centroid and size per cluster"
+    },
+    {
+      "Name": "plotly_anomaly_fl",
+      "Parameters": "(tbl: (*), time_col: string, val_col: string, baseline_col: string, time_high_col: string, val_high_col: string, size_high_col: string, time_low_col: string, val_low_col: string, size_low_col: string, chart_title: string, series_name: string, val_name: string)",
+      "Body": "{\r\n    let anomaly_chart = toscalar(PlotlyTemplate | where name == \"anomaly\" | project plotly);\r\n    let tbl_ex = tbl | extend _timestamp = column_ifexists(time_col, datetime(null)), _values = column_ifexists(val_col, 0.0), _baseline = column_ifexists(baseline_col, 0.0),\r\n                              _high_timestamp = column_ifexists(time_high_col, datetime(null)), _high_values = column_ifexists(val_high_col, 0.0), _high_size = column_ifexists(size_high_col, 1),\r\n                              _low_timestamp = column_ifexists(time_low_col, datetime(null)), _low_values = column_ifexists(val_low_col, 0.0), _low_size = column_ifexists(size_low_col, 1);\r\n    tbl_ex\r\n    | extend plotly = anomaly_chart\r\n    | extend plotly=replace_string(plotly, '$TIME_STAMPS$', tostring(_timestamp))\r\n    | extend plotly=replace_string(plotly, '$SERIES_VALS$', tostring(_values))\r\n    | extend plotly=replace_string(plotly, '$BASELINE_VALS$', tostring(_baseline))\r\n    | extend plotly=replace_string(plotly, '$TIME_STAMPS_HIGH_ANOMALIES$', tostring(_high_timestamp))\r\n    | extend plotly=replace_string(plotly, '$HIGH_ANOMALIES_VALS$', tostring(_high_values))\r\n    | extend plotly=replace_string(plotly, '$HIGH_ANOMALIES_MARKER_SIZE$', tostring(_high_size))\r\n    | extend plotly=replace_string(plotly, '$TIME_STAMPS_LOW_ANOMALIES$', tostring(_low_timestamp))\r\n    | extend plotly=replace_string(plotly, '$LOW_ANOMALIES_VALS$', tostring(_low_values))\r\n    | extend plotly=replace_string(plotly, '$LOW_ANOMALIES_MARKER_SIZE$', tostring(_low_size))\r\n    | extend plotly=replace_string(plotly, '$TITLE$', chart_title)\r\n    | extend plotly=replace_string(plotly, '$SERIES_NAME$', series_name)\r\n    | extend plotly=replace_string(plotly, '$Y_NAME$', val_name)\r\n    | project plotly\r\n}",
+      "Description": "Render anomaly chart using plotly template"
+    },
+    {
+      "Name": "plotly_scatter3d_fl",
+      "Parameters": "(tbl: (*), x_col: string, y_col: string, z_col: string, aggr_col: string, chart_title: string)",
+      "Body": "{\r\n    let scatter3d_chart = toscalar(PlotlyTemplate | where name == \"scatter3d\" | project plotly);\r\n    let tbl_ex = tbl | extend _x = column_ifexists(x_col, 0.0), _y = column_ifexists(y_col, 0.0), _z = column_ifexists(z_col, 0.0), _aggr = column_ifexists(aggr_col, 'ALL');\r\n    tbl_ex\r\n    | serialize \r\n    | summarize _x=pack_array(make_list(_x)), _y=pack_array(make_list(_y)), _z=pack_array(make_list(_z)) by _aggr\r\n    | summarize _aggr=make_list(_aggr), _x=make_list(_x), _y=make_list(_y), _z=make_list(_z)\r\n    | extend plotly = scatter3d_chart\r\n    | extend plotly=replace_string(plotly, '$CLASS1$', tostring(_aggr[0]))\r\n    | extend plotly=replace_string(plotly, '$CLASS2$', tostring(_aggr[1]))\r\n    | extend plotly=replace_string(plotly, '$CLASS3$', tostring(_aggr[2]))\r\n    | extend plotly=replace_string(plotly, '$X_NAME$', x_col)\r\n    | extend plotly=replace_string(plotly, '$Y_NAME$', y_col)\r\n    | extend plotly=replace_string(plotly, '$Z_NAME$', z_col)\r\n    | extend plotly=replace_string(plotly, '$CLASS1_X$', tostring(_x[0]))\r\n    | extend plotly=replace_string(plotly, '$CLASS1_Y$', tostring(_y[0]))\r\n    | extend plotly=replace_string(plotly, '$CLASS1_Z$', tostring(_z[0]))\r\n    | extend plotly=replace_string(plotly, '$CLASS2_X$', tostring(_x[1]))\r\n    | extend plotly=replace_string(plotly, '$CLASS2_Y$', tostring(_y[1]))\r\n    | extend plotly=replace_string(plotly, '$CLASS2_Z$', tostring(_z[1]))\r\n    | extend plotly=replace_string(plotly, '$CLASS3_X$', tostring(_x[2]))\r\n    | extend plotly=replace_string(plotly, '$CLASS3_Y$', tostring(_y[2]))\r\n    | extend plotly=replace_string(plotly, '$CLASS3_Z$', tostring(_z[2]))\r\n    | extend plotly=replace_string(plotly, '$TITLE$', chart_title)\r\n    | project plotly\r\n}",
+      "Description": "Render 3D scatter chart using plotly template"
+    },
+    {
+      "Name": "series_cosine_similarity_fl",
+      "Parameters": "(vec1: dynamic, vec2: dynamic, vec1_size: real, vec2_size: real)",
+      "Body": "{\r\n    let dp = series_dot_product(vec1, vec2);\r\n    let v1l = iff(isnull(vec1_size), sqrt(series_dot_product(vec1, vec1)), vec1_size);\r\n    let v2l = iff(isnull(vec2_size), sqrt(series_dot_product(vec2, vec2)), vec2_size);\r\n    dp/(v1l*v2l)\r\n}",
+      "Description": "Calculate the Cosine similarity of 2 numerical arrays"
+    },
+    {
+      "Name": "series_clean_anomalies_fl",
+      "Parameters": "(series: dynamic, anomalies: dynamic)",
+      "Body": "{\r\n    let anomalies2 = series_multiply(anomalies, anomalies);     //    square anomalies just to convert -1 anomalies to 1  \r\n    let fnum = series_add(series_multiply(anomalies2, -1), series_multiply(series_less(anomalies2, 1), series)); // replace anomalies by -1\r\n    series_fill_linear(fnum, -1)                                //  interpolate\r\n}",
+      "Description": "Replace anomalies by interpolated value"
     }
   ]
 }

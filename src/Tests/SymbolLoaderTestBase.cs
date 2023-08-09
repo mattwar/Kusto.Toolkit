@@ -70,6 +70,9 @@ namespace Tests
                 case FunctionSymbol fun:
                     AssertEqual(fun, (FunctionSymbol)actual);
                     break;
+                case EntityGroupSymbol eg:
+                    AssertEqual(eg, (EntityGroupSymbol)actual);
+                    break;
                 default:
                     Assert.Fail($"Unhandled symbol type: {expected.Kind}");
                     break;
@@ -78,8 +81,8 @@ namespace Tests
 
         protected static void AssertEqual(ClusterSymbol expected, ClusterSymbol actual)
         {
-            Assert.AreEqual(expected.Name, actual.Name, "name");
-            Assert.AreEqual(expected.Members.Count, actual.Members.Count, "cluster member count");
+            Assert.AreEqual(expected.Name, actual.Name, "cluster name");
+            Assert.AreEqual(expected.Members.Count, actual.Members.Count, "cluster members count");
 
             for (int i = 0; i < expected.Members.Count; i++)
             {
@@ -89,24 +92,34 @@ namespace Tests
 
         protected static void AssertEqual(DatabaseSymbol expected, DatabaseSymbol actual)
         {
-            Assert.AreEqual(expected.Name, actual.Name, "name");
-            Assert.AreEqual(expected.Members.Count, actual.Members.Count, $"database {expected.Name} member count");
+            Assert.AreEqual(expected.Name, actual.Name, "database name");
+            Assert.AreEqual(expected.AlternateName, actual.AlternateName, "database alternate name");
 
+            Assert.AreEqual(expected.Tables.Count, actual.Tables.Count, "tables count");
             for (int i = 0; i < expected.Tables.Count; i++)
             {
                 AssertEqual(expected.Tables[i], actual.Tables[i]);
             }
 
+            Assert.AreEqual(expected.ExternalTables.Count, actual.ExternalTables.Count, "external tables count");
             for (int i = 0; i < expected.ExternalTables.Count; i++)
             {
                 AssertEqual(expected.ExternalTables[i], actual.ExternalTables[i]);
             }
 
+            Assert.AreEqual(expected.MaterializedViews.Count, actual.MaterializedViews.Count, "materialized views count");
             for (int i = 0; i < expected.MaterializedViews.Count; i++)
             {
                 AssertEqual(expected.MaterializedViews[i], actual.MaterializedViews[i]);
             }
 
+            Assert.AreEqual(expected.EntityGroups.Count, actual.EntityGroups.Count, "entity groups count");
+            for (int i = 0; i < expected.EntityGroups.Count; i++)
+            {
+                AssertEqual(expected.EntityGroups[i], actual.EntityGroups[i]);
+            }
+
+            Assert.AreEqual(expected.Functions.Count, actual.Functions.Count, "functions count");
             for (int i = 0; i < expected.Functions.Count; i++)
             {
                 AssertEqual(expected.Functions[i], actual.Functions[i]);
@@ -115,7 +128,8 @@ namespace Tests
 
         protected static void AssertEqual(TableSymbol expected, TableSymbol actual)
         {
-            Assert.AreEqual(expected.Name, actual.Name, "name");
+            Assert.AreEqual(expected.Name, actual.Name, "table name");
+            Assert.AreEqual(expected.Description, actual.Description, "table description");
 
             var expectedSchema = SymbolFacts.GetSchema(expected);
             var actualSchema = SymbolFacts.GetSchema(actual);
@@ -124,7 +138,8 @@ namespace Tests
 
         protected static void AssertEqual(ExternalTableSymbol expected, ExternalTableSymbol actual)
         {
-            Assert.AreEqual(expected.Name, actual.Name, "name");
+            Assert.AreEqual(expected.Name, actual.Name, "external table name");
+            Assert.AreEqual(expected.Description, actual.Description, "external table description");
 
             var expectedSchema = SymbolFacts.GetSchema(expected);
             var actualSchema = SymbolFacts.GetSchema(actual);
@@ -133,7 +148,8 @@ namespace Tests
 
         protected static void AssertEqual(MaterializedViewSymbol expected, MaterializedViewSymbol actual)
         {
-            Assert.AreEqual(expected.Name, actual.Name, "name");
+            Assert.AreEqual(expected.Name, actual.Name, "materialized view name");
+            Assert.AreEqual(expected.Description, actual.Description, "materialized view description");
 
             var expectedSchema = SymbolFacts.GetSchema(expected);
             var actualSchema = SymbolFacts.GetSchema(actual);
@@ -142,9 +158,17 @@ namespace Tests
             Assert.AreEqual(expected.MaterializedViewQuery, actual.MaterializedViewQuery, $"materialzed view '{expected.Name}' query");
         }
 
+        protected static void AssertEqual(EntityGroupSymbol expected, EntityGroupSymbol actual)
+        {
+            Assert.AreEqual(expected.Name, actual.Name, "entity group name");
+            Assert.AreEqual(expected.Description, actual.Description, "entity group description");
+            Assert.AreEqual(expected.Definition, actual.Definition, "entity group definition");
+        }
+
         protected static void AssertEqual(FunctionSymbol expected, FunctionSymbol actual)
         {
-            Assert.AreEqual(expected.Name, actual.Name, "name");
+            Assert.AreEqual(expected.Name, actual.Name, "function name");
+            Assert.AreEqual(expected.Description, actual.Description, "function description");
 
             var expectedParameters = SymbolFacts.GetParameterList(expected);
             var actualParameters = SymbolFacts.GetParameterList(actual);
