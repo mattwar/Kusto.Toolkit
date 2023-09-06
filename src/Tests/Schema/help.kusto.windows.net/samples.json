@@ -103,6 +103,10 @@
     {
       "Name": "PlotlyTemplate",
       "Schema": "(name: string, plotly: string)"
+    },
+    {
+      "Name": "demo_series1",
+      "Schema": "(id: string, x: dynamic, y: dynamic)"
     }
   ],
   "ExternalTables": [
@@ -340,8 +344,8 @@
     },
     {
       "Name": "series_clean_anomalies_fl",
-      "Parameters": "(series: dynamic, anomalies: dynamic)",
-      "Body": "{\r\n    let anomalies2 = series_multiply(anomalies, anomalies);     //    square anomalies just to convert -1 anomalies to 1  \r\n    let fnum = series_add(series_multiply(anomalies2, -1), series_multiply(series_less(anomalies2, 1), series)); // replace anomalies by -1\r\n    series_fill_linear(fnum, -1)                                //  interpolate\r\n}",
+      "Parameters": "(y_series: dynamic, anomalies: dynamic)",
+      "Body": "{\r\n    let fnum = array_iff(series_not_equals(anomalies, 0), real(null), y_series);  //  replace anomalies with null values\r\n    series_fill_linear(fnum)\r\n}",
       "Description": "Replace anomalies by interpolated value"
     }
   ]

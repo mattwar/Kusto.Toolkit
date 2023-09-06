@@ -124,7 +124,7 @@ namespace Kusto.Toolkit
                 && badDbNames.Contains(databaseName);
         }
 
-        private void AddBadDatabasename(string clusterName, string databaseName)
+        private void AddBadDatabaseName(string clusterName, string databaseName)
         {
             if (!_clusterToBadDbNameMap.TryGetValue(clusterName, out var badDbNames))
             {
@@ -156,25 +156,18 @@ namespace Kusto.Toolkit
             var connection = GetClusterConnection(clusterName);
             var provider = GetOrCreateAdminProvider(connection);
 
-            // get database name & pretty name from .show databases
-            var dbNameLiteral = KustoFacts.GetStringLiteral(databaseName);
-            var dbInfos = await ExecuteControlCommandAsync<ShowDatabasesResult>(
-                provider, database: "",
-                $".show databases | where DatabaseName == {dbNameLiteral} or PrettyName == {dbNameLiteral}",
-                throwOnError, cancellationToken);
-
-            var dbInfo = dbInfos?.FirstOrDefault();
-            if (dbInfo == null)
+            var dbName = await GetBothDatabaseNamesAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            if (dbName == null)
             {
-                AddBadDatabasename(clusterName, databaseName);
+                AddBadDatabaseName(clusterName, databaseName);
                 return null;
             }
 
-            var tables = await LoadTablesAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            var externalTables = await LoadExternalTablesAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            var materializedViews = await LoadMaterializedViewsAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            var functions = await LoadFunctionsAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
-            var entityGroups = await LoadEntityGroupsAsync(provider, dbInfo.DatabaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var tables = await LoadTablesAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
+            var externalTables = await LoadExternalTablesAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
+            var materializedViews = await LoadMaterializedViewsAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
+            var functions = await LoadFunctionsAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
+            var entityGroups = await LoadEntityGroupsAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
 
             var members = new List<Symbol>();
             members.AddRange(tables);
@@ -183,8 +176,29 @@ namespace Kusto.Toolkit
             members.AddRange(functions);
             members.AddRange(entityGroups);
 
-            var databaseSymbol = new DatabaseSymbol(dbInfo.DatabaseName, dbInfo.PrettyName, members);
+            var databaseSymbol = new DatabaseSymbol(dbName.Name, dbName.PrettyName, members);
             return databaseSymbol;
+        }
+
+        /// <summary>
+        /// Returns the database name and pretty name given either the database name or the pretty name.
+        /// </summary>
+        private async Task<DatabaseName> GetBothDatabaseNamesAsync(ICslAdminProvider provider, string databaseNameOrPrettyName, bool throwOnError, CancellationToken cancellationToken)
+        {
+            // use show database <name> schema to determine both names
+            var dbInfos = await ExecuteControlCommandAsync<GetDatabaseInfoResult>(
+                provider, database: "",
+                // we just need the row that does not have table/column info
+                $".show database {KustoFacts.GetBracketedName(databaseNameOrPrettyName)} schema | where TableName == '' | project DatabaseName, PrettyName",
+                throwOnError, cancellationToken);
+
+            var dbInfo = dbInfos?.FirstOrDefault();
+            if (dbInfo != null)
+            {
+                return new DatabaseName(dbInfo.DatabaseName, dbInfo.PrettyName);
+            }
+
+            return null;
         }
 
         private async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
@@ -370,6 +384,12 @@ namespace Kusto.Toolkit
             public bool ReservedSlot1;
             public Guid DatabaseId;
             public string InTransitionTo;
+        }
+
+        public class GetDatabaseInfoResult
+        {
+            public string DatabaseName;
+            public string PrettyName;
         }
 
         public class ShowDatabaseCslSchemaResult
