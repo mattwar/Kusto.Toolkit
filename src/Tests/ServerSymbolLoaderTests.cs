@@ -14,9 +14,9 @@ namespace Tests
     [TestClass]
     public class ServerSymbolLoaderTests : SymbolLoaderTestBase
     {
-        private ServerSymbolLoader CreateLoader()
+        private ServerSymbolLoader CreateLoader(string connection = null)
         {
-            return new ServerSymbolLoader(new KustoConnectionStringBuilder(HelpConnection));
+            return new ServerSymbolLoader(new KustoConnectionStringBuilder(connection ?? HelpConnection));
         }
 
         [TestMethod]
@@ -141,5 +141,18 @@ namespace Tests
                 Assert.IsNull(dbSymbol);
             }
         }
+
+#if false
+        [TestMethod]
+        public async Task TestLoadDatabaseAsync_PrettyName()       
+        {
+            // test with a private cluster since no databases in Help cluster have pretty names
+            using (var loader = CreateLoader("Data Source=https://kvcc4b8b0165e074002bc5.southcentralus.kusto.windows.net;Fed=true"))
+            {
+                var dbSymbol = await loader.LoadDatabaseAsync("PrettyZomg");
+                Assert.IsNotNull(dbSymbol);
+            }
+        }
+#endif
     }
 }

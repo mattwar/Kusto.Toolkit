@@ -185,11 +185,10 @@ namespace Kusto.Toolkit
         /// </summary>
         private async Task<DatabaseName> GetBothDatabaseNamesAsync(ICslAdminProvider provider, string databaseNameOrPrettyName, bool throwOnError, CancellationToken cancellationToken)
         {
-            // use show database <name> schema to determine both names
             var dbInfos = await ExecuteControlCommandAsync<GetDatabaseInfoResult>(
-                provider, database: "",
-                // we just need the row that does not have table/column info
-                $".show database {KustoFacts.GetBracketedName(databaseNameOrPrettyName)} schema | where TableName == '' | project DatabaseName, PrettyName",
+                provider, 
+                database: databaseNameOrPrettyName,
+                $".show database identity | project DatabaseName, PrettyName",
                 throwOnError, cancellationToken);
 
             var dbInfo = dbInfos?.FirstOrDefault();
