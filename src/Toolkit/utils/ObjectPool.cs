@@ -10,7 +10,7 @@ namespace Kusto.Toolkit
     {
         private readonly Func<T> creator;
         private readonly Action<T> resetter;
-        private readonly T[] items;
+        private readonly T?[] items;
 
         public ObjectPool(Func<T> creator, Action<T> resetter, int size = 10)
         {
