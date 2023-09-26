@@ -320,7 +320,6 @@ namespace Tests
             TestGetSourceColumns("let fn=(text: string) { text }; TabXY | project Q=fn(y)", "Q", "TabXY.y", globals);
         }
 
-
         [TestMethod]
         public void TestGetSourceColumns_macro_expand()
         {
