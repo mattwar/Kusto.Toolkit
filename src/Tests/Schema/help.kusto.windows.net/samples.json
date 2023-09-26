@@ -347,6 +347,18 @@
       "Parameters": "(y_series: dynamic, anomalies: dynamic)",
       "Body": "{\r\n    let fnum = array_iff(series_not_equals(anomalies, 0), real(null), y_series);  //  replace anomalies with null values\r\n    series_fill_linear(fnum)\r\n}",
       "Description": "Replace anomalies by interpolated value"
+    },
+    {
+      "Name": "erf",
+      "Parameters": "(x: real)",
+      "Body": "{\r\n    let a =  dynamic([0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429]);\r\n    let abs_x = abs(x);\r\n    let t = 1.0/(1.0 + 0.3275911*abs_x);\r\n    let y = 1.0 - (((((a[4]*t + a[3])*t) + a[2])*t + a[1])*t + a[0])*t*exp(-x*x);\r\n    iff(x < 0, -y, y)\r\n}",
+      "Description": "Calculate Gauss error function"
+    },
+    {
+      "Name": "erf_fl",
+      "Parameters": "(x: real)",
+      "Body": "{\r\n    let a =  dynamic([0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429]);\r\n    let abs_x = abs(x);\r\n    let t = 1.0/(1.0 + 0.3275911*abs_x);\r\n    let y = 1.0 - (((((a[4]*t + a[3])*t) + a[2])*t + a[1])*t + a[0])*t*exp(-x*x);\r\n    iff(x < 0, -y, y)\r\n}",
+      "Description": "Calculate Gauss error function"
     }
   ]
 }

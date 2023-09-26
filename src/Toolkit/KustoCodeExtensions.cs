@@ -1,9 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
 using Kusto.Language;
 using Kusto.Language.Symbols;
 using Kusto.Language.Syntax;
-using Kusto.Language.Utils;
 
 namespace Kusto.Toolkit
 {
@@ -49,55 +47,73 @@ namespace Kusto.Toolkit
         {
             var memberSet = new HashSet<TMember>();
             var memberList = new List<TMember>();
-            GatherMembers(code.Syntax);
-            return memberList;
 
-            void GatherMembers(SyntaxNode root)
+            var rootQueue = s_nodeQueuePool.AllocateFromPool();
+            var visitedRoots = s_nodeSetPool.AllocateFromPool();
+
+            try
             {
-                SyntaxElement.WalkNodes(root,
-                    fnBefore: n =>
-                    {
-                        if (n.ReferencedSymbol is GroupSymbol referencedGroup)
-                        {
-                            AddGroupMembers(referencedGroup);
-                        }
-                        else if (n.ReferencedSymbol is TMember member)
-                        {
-                            AddMember(member);
-                        }
+                rootQueue.Enqueue(code.Syntax);
 
-                        if (n is Expression e)
+                while (rootQueue.Count > 0)
+                {                   
+                    var root = rootQueue.Dequeue();
+                    
+                    if (!visitedRoots.Add(root))
+                        continue;
+
+                    SyntaxElement.WalkNodes(root,
+                        fnBefore: n =>
                         {
-                            if (e.ResultType is GroupSymbol resultGroup)
+                            if (n.ReferencedSymbol is GroupSymbol referencedGroup)
                             {
-                                AddGroupMembers(resultGroup);
+                                AddGroupMembers(referencedGroup);
                             }
-                            else if (e.ResultType is TMember member)
+                            else if (n.ReferencedSymbol is TMember member)
                             {
                                 AddMember(member);
                             }
-                        }
 
-                        if (n.GetCalledFunctionBody() is SyntaxNode body)
-                        {
-                            GatherMembers(body);
-                        }
-                    },
-                    fnAfter: n =>
-                    {
-                        if (n.Alternates != null)
-                        {
-                            foreach (var alt in n.Alternates)
+                            if (n is Expression e)
                             {
-                                GatherMembers(alt);
+                                if (e.ResultType is GroupSymbol resultGroup)
+                                {
+                                    AddGroupMembers(resultGroup);
+                                }
+                                else if (e.ResultType is TMember member)
+                                {
+                                    AddMember(member);
+                                }
                             }
-                        }
-                    },
-                    fnDescend: n =>
-                        // skip descending into function declarations since their bodies will be examined by the code above
-                        !(n is FunctionDeclaration)
-                    );
+
+                            if (n.GetCalledFunctionBody() is SyntaxNode body)
+                            {
+                                rootQueue.Enqueue(body);
+                            }
+                        },
+                        fnAfter: n =>
+                        {
+                            if (n.Alternates != null)
+                            {
+                                foreach (var alt in n.Alternates)
+                                {
+                                    rootQueue.Enqueue(alt);
+                                }
+                            }
+                        },
+                        fnDescend: n =>
+                            // skip descending into function declarations since their bodies will be examined by the code above
+                            !(n is FunctionDeclaration)
+                        );
+                }
             }
+            finally
+            {
+                s_nodeQueuePool.ReturnToPool(rootQueue);
+                s_nodeSetPool.ReturnToPool(visitedRoots);
+            }
+
+            return memberList;
 
             bool Matches(TMember member)
             {
@@ -149,43 +165,60 @@ namespace Kusto.Toolkit
         /// </summary>
         public static IReadOnlyList<ColumnSymbol> GetDatabaseTableColumnsReferenced(SyntaxNode root, GlobalState globals)
         {
-            var columnSet = new HashSet<ColumnSymbol>();
             var columnList = new List<ColumnSymbol>();
 
-            GatherColumns(root);
+            var columnSet = s_columnSetPool.AllocateFromPool();
+            var rootQueue = s_nodeQueuePool.AllocateFromPool();
+            var visitedRoots = s_nodeSetPool.AllocateFromPool();
+
+            try
+            {
+                rootQueue.Enqueue(root);
+
+                while (rootQueue.Count > 0)
+                {
+                    root = rootQueue.Dequeue();
+                    
+                    if (!visitedRoots.Add(root))
+                        continue;
+
+                    SyntaxElement.WalkNodes(root,
+                        fnBefore: n =>
+                        {
+                            if (n.ReferencedSymbol is ColumnSymbol c)
+                            {
+                                AddDatabaseTableColumn(c, columnSet, columnList, globals);
+                            }
+
+                            if (n.GetCalledFunctionBody() is SyntaxNode body)
+                            {
+                                rootQueue.Enqueue(body);
+                            }
+                        },
+                        fnAfter: n =>
+                        {
+                            if (n.Alternates != null)
+                            {
+                                foreach (var alt in n.Alternates)
+                                {
+                                    rootQueue.Enqueue(alt);
+                                }
+                            }
+                        },
+                        fnDescend: n =>
+                            // skip descending into function declarations since their bodies will be examined by the code above
+                            !(n is FunctionDeclaration)
+                        );
+                }
+            }
+            finally
+            {
+                s_nodeSetPool.ReturnToPool(visitedRoots);
+                s_nodeQueuePool.ReturnToPool(rootQueue);
+                s_columnSetPool.ReturnToPool(columnSet);
+            }
 
             return columnList;
-
-            void GatherColumns(SyntaxNode root)
-            {
-                SyntaxElement.WalkNodes(root,
-                    fnBefore: n =>
-                    {
-                        if (n.ReferencedSymbol is ColumnSymbol c)
-                        {
-                            AddDatabaseTableColumn(c, columnSet, columnList, globals);
-                        }
-
-                        if (n.GetCalledFunctionBody() is SyntaxNode body)
-                        {
-                            GatherColumns(body);
-                        }
-                    },
-                    fnAfter: n =>
-                    {
-                        if (n.Alternates != null)
-                        {
-                            foreach (var alt in n.Alternates)
-                            {
-                                GatherColumns(alt);
-                            }
-                        }
-                    },
-                    fnDescend: n =>
-                        // skip descending into function declarations since their bodies will be examined by the code above
-                        !(n is FunctionDeclaration)
-                    );
-            }
         }
 
         private static void AddDatabaseTableColumn(ColumnSymbol column, HashSet<ColumnSymbol> columnSet, List<ColumnSymbol> columnList, GlobalState globals)
@@ -292,5 +325,19 @@ namespace Kusto.Toolkit
                 return Array.Empty<ColumnSymbol>();
             }
         }
+
+        // pools
+
+        private static readonly ObjectPool<Queue<ColumnSymbol>> s_columnQueuePool =
+            new ObjectPool<Queue<ColumnSymbol>>(() => new Queue<ColumnSymbol>(), q => q.Clear());
+
+        private static readonly ObjectPool<Queue<SyntaxNode>> s_nodeQueuePool =
+            new ObjectPool<Queue<SyntaxNode>>(() => new Queue<SyntaxNode>(), q => q.Clear());
+
+        private static readonly ObjectPool<HashSet<ColumnSymbol>> s_columnSetPool =
+            new ObjectPool<HashSet<ColumnSymbol>>(() => new HashSet<ColumnSymbol>(), q => q.Clear());
+
+        private static readonly ObjectPool<HashSet<SyntaxNode>> s_nodeSetPool =
+            new ObjectPool<HashSet<SyntaxNode>>(() => new HashSet<SyntaxNode>(), q => q.Clear());
     }
 }
