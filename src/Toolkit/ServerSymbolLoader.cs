@@ -109,9 +109,9 @@ namespace Kusto.Toolkit
             var connection = GetClusterConnection(clusterName);
             var provider = GetOrCreateAdminProvider(connection);
 
-            var databases = await ExecuteControlCommandAsync<ShowDatabasesResult>(
+            var databases = await ExecuteControlCommandAsync<DatabaseNamesResult>(
                 provider, database: "", 
-                ".show databases",
+                ".show databases | project DatabaseName, PrettyName",
                 throwOnError, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -185,27 +185,26 @@ namespace Kusto.Toolkit
         /// </summary>
         private async Task<DatabaseName> GetBothDatabaseNamesAsync(ICslAdminProvider provider, string databaseNameOrPrettyName, bool throwOnError, CancellationToken cancellationToken)
         {
-            var dbInfos = await ExecuteControlCommandAsync<GetDatabaseInfoResult>(
-                provider, 
+            var dbInfos = await ExecuteControlCommandAsync<DatabaseNamesResult>(
+                provider,
                 database: databaseNameOrPrettyName,
                 $".show database identity | project DatabaseName, PrettyName",
-                throwOnError, cancellationToken);
+                throwOnError, cancellationToken)
+                .ConfigureAwait(false);
 
             var dbInfo = dbInfos?.FirstOrDefault();
-            if (dbInfo != null)
-            {
-                return new DatabaseName(dbInfo.DatabaseName, dbInfo.PrettyName);
-            }
 
-            return null;
+            return dbInfo != null
+                ? new DatabaseName(dbInfo.DatabaseName, dbInfo.PrettyName)
+                : null;
         }
 
         private async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
         {
             // get table schema from .show database xxx cslschema
-            var tableSchemas = await ExecuteControlCommandAsync<ShowDatabaseCslSchemaResult>(
+            var tableSchemas = await ExecuteControlCommandAsync<LoadTablesResult>(
                 provider, databaseName,
-                $".show database {KustoFacts.GetBracketedName(databaseName)} cslschema",
+                $".show database {KustoFacts.GetBracketedName(databaseName)} cslschema | project TableName, Schema, DocString",
                 throwOnError, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -221,14 +220,17 @@ namespace Kusto.Toolkit
             var tables = new List<TableSymbol>();
 
             // get external tables from .show external tables and .show external table xxx cslschema
-            var externalTables = await ExecuteControlCommandAsync<ShowExternalTablesResult>(provider, databaseName, ".show external tables", throwOnError, cancellationToken);
+            var externalTables = await ExecuteControlCommandAsync<LoadExternalTablesResult1>(
+                provider, databaseName, 
+                ".show external tables | project TableName, DocString", 
+                throwOnError, cancellationToken);
             if (externalTables != null)
             {
                 foreach (var et in externalTables)
                 {
-                    var etSchemas = await ExecuteControlCommandAsync<ShowExternalTableCslSchemaResult>(
+                    var etSchemas = await ExecuteControlCommandAsync<LoadExternalTablesResult2>(
                         provider, databaseName,
-                        $".show external table {KustoFacts.GetBracketedName(et.TableName)} cslschema",
+                        $".show external table {KustoFacts.GetBracketedName(et.TableName)} cslschema | project TableName, Schema",
                         throwOnError, cancellationToken)
                         .ConfigureAwait(false);
 
@@ -248,18 +250,19 @@ namespace Kusto.Toolkit
             var tables = new List<TableSymbol>();
 
             // get materialized views from .show materialized-views and .show materialized-view xxx cslschema
-            var materializedViews = await ExecuteControlCommandAsync<ShowMaterializedViewsResult>(
-                provider, databaseName, 
-                ".show materialized-views", 
-                throwOnError, cancellationToken);
+            var materializedViews = await ExecuteControlCommandAsync<LoadMaterializedViewsResult1>(
+                provider, databaseName,
+                ".show materialized-views | project Name, Query, DocString",
+                throwOnError, cancellationToken)
+                .ConfigureAwait(false);
 
             if (materializedViews != null)
             {
                 foreach (var mv in materializedViews)
                 {
-                    var mvSchemas = await ExecuteControlCommandAsync<ShowMaterializedViewSchemaResult>(
+                    var mvSchemas = await ExecuteControlCommandAsync<LoadMeterializedViewsResult2>(
                         provider, databaseName, 
-                        $".show materialized-view {KustoFacts.GetBracketedName(mv.Name)} cslschema", 
+                        $".show materialized-view {KustoFacts.GetBracketedName(mv.Name)} cslschema | project TableName, Schema", 
                         throwOnError, cancellationToken)
                         .ConfigureAwait(false);
 
@@ -279,11 +282,12 @@ namespace Kusto.Toolkit
             var functions = new List<FunctionSymbol>();
 
             // get functions for .show functions
-            var functionSchemas = await ExecuteControlCommandAsync<ShowFunctionsResult>(
+            var functionSchemas = await ExecuteControlCommandAsync<LoadFunctionsResult>(
                 provider, databaseName, 
-                ".show functions", 
+                ".show functions | project Name, Parameters, Body, DocString", 
                 throwOnError, cancellationToken)
                 .ConfigureAwait(false);
+
             if (functionSchemas == null)
                 return null;
 
@@ -301,11 +305,12 @@ namespace Kusto.Toolkit
             var entityGroupSymbols = new List<EntityGroupSymbol>();
 
             // get entity groups via .show entity_groups
-            var entityGroups = await ExecuteControlCommandAsync<ShowEntityGroupsResult>(
+            var entityGroups = await ExecuteControlCommandAsync<LoadEntityGroupsResult>(
                 provider, databaseName, 
-                ".show entity_groups",
+                ".show entity_groups | project Name, Entities",
                 throwOnError, cancellationToken)
                 .ConfigureAwait(false);
+
             if (entityGroups == null)
                 return null;
 
@@ -372,69 +377,53 @@ namespace Kusto.Toolkit
             return connection;
         }
 
-        public class ShowDatabasesResult
-        {
-            public string DatabaseName;
-            public string PersistentStorage;
-            public string Version;
-            public bool IsCurrent;
-            public string DatabaseAccessMode;
-            public string PrettyName;
-            public bool ReservedSlot1;
-            public Guid DatabaseId;
-            public string InTransitionTo;
-        }
-
-        public class GetDatabaseInfoResult
+        public class DatabaseNamesResult
         {
             public string DatabaseName;
             public string PrettyName;
         }
 
-        public class ShowDatabaseCslSchemaResult
+        public class LoadTablesResult
         {
             public string TableName;
             public string Schema;
-            public string DatabaseName;
-            public string Folder;
             public string DocString;
         }
 
-        public class ShowExternalTablesResult
+        public class LoadExternalTablesResult1
         {
             public string TableName;
             public string DocString;
         }
 
-        public class ShowExternalTableCslSchemaResult
+        public class LoadExternalTablesResult2
         {
             public string TableName;
             public string Schema;
         }
 
-        public class ShowMaterializedViewsResult
+        public class LoadMaterializedViewsResult1
         {
             public string Name;
-            public string DocString;
             public string Query;
+            public string DocString;
         }
 
-        public class ShowMaterializedViewSchemaResult
+        public class LoadMeterializedViewsResult2
         {
             public string Name;
             public string Schema;
         }
 
-        public class ShowFunctionsResult
+        public class LoadFunctionsResult
         {
             public string Name;
             public string Parameters;
             public string Body;
-            public string Folder;
             public string DocString;
         }
 
-        public class ShowEntityGroupsResult
+        public class LoadEntityGroupsResult
         {
             public string Name;
             public string Entities;

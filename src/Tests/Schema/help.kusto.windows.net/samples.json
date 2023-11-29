@@ -113,14 +113,13 @@
     {
       "Name": "TaxiRides",
       "Schema": "(trip_id: long, vendor_id: string, pickup_datetime: datetime, dropoff_datetime: datetime, store_and_fwd_flag: string, rate_code_id: int, pickup_longitude: real, pickup_latitude: real, dropoff_longitude: real, dropoff_latitude: real, passenger_count: int, trip_distance: real, fare_amount: real, extra: real, mta_tax: real, tip_amount: real, tolls_amount: real, ehail_fee: real, improvement_surcharge: real, total_amount: real, payment_type: string, trip_type: int, pickup: string, dropoff: string, cab_type: string, precipitation: int, snow_depth: int, snowfall: int, max_temperature: int, min_temperature: int, average_wind_speed: int, pickup_nyct2010_gid: int, pickup_ctlabel: string, pickup_borocode: int, pickup_boroname: string, pickup_ct2010: string, pickup_boroct2010: string, pickup_cdeligibil: string, pickup_ntacode: string, pickup_ntaname: string, pickup_puma: string, dropoff_nyct2010_gid: int, dropoff_ctlabel: string, dropoff_borocode: int, dropoff_boroname: string, dropoff_ct2010: string, dropoff_boroct2010: string, dropoff_cdeligibil: string, dropoff_ntacode: string, dropoff_ntaname: string, dropoff_puma: string)",
-      "Description": "Blob"
+      "Description": "NYC taxi rides. Data source: https://www1.nyc.gov/site/tlc/about/tlc-trip-record-data.page"
     }
   ],
   "MaterializedViews": [
     {
       "Name": "DailyCovid19",
       "Schema": "(Timestamp: datetime, Country: string, State: string, CountryCode: string, StateCode: string, max_Confirmed: long, max_Deaths: long, max_Recovered: long, max_Active: long)",
-      "Description": "Covid19",
       "Query": "Covid19\r\n    | summarize max(Confirmed), max(Deaths), max(Recovered), max(Active) by bin(Timestamp, 1d), Country, State, CountryCode, StateCode"
     }
   ],
