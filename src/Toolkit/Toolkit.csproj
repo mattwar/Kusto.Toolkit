@@ -5,7 +5,7 @@
     <TargetFrameworks>net6.0;net472;netstandard2.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-	<LangVersion>10.0</LangVersion>
+    <LangVersion>11.0</LangVersion>
     <AssemblyName>Kusto.Toolkit</AssemblyName>
     <RootNamespace>$(AssemblyName)</RootNamespace>
     <BaseOutputPath>bin\</BaseOutputPath>
@@ -17,20 +17,13 @@
     <Title>$(AssemblyName)</Title>
     <Authors>mattwar</Authors>
     <Description>A library of tools to help you analyze Kusto queries.</Description>
-	<PackageProjectUrl>https://github.com/mattwar/Kushy</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/mattwar/Kushy</PackageProjectUrl>
     <RepositoryUrl>https://github.com/mattwar/Kushy</RepositoryUrl>
     <PackageReadmeFile>NugetReadme.md</PackageReadmeFile>
     <PackageTags>Kusto, KQL, C#, CSharp, DOTNET</PackageTags>
     <PackageLicenseExpression> Apache-2.0</PackageLicenseExpression>
     <Copyright>Copyright (c) Matt Warren 2022</Copyright>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <NoWarn>1701;1702;CS1591</NoWarn>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <NoWarn>1701;1702;CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -39,9 +32,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Azure.Kusto.Data" Version="11.3.2" />
-    <PackageReference Include="Microsoft.Azure.Kusto.Language" Version="11.3.24011" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
+    <PackageReference Include="Microsoft.Azure.Kusto.Data" Version="12.2.2" />
+    <PackageReference Include="Microsoft.Azure.Kusto.Language" Version="11.5.6" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
   <ItemGroup>
