@@ -5,7 +5,7 @@
     <TargetFrameworks>net6.0;net472;netstandard2.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-	<LangVersion>10.0</LangVersion>
+    <LangVersion>11.0</LangVersion>
     <AssemblyName>Kusto.Toolkit</AssemblyName>
     <RootNamespace>$(AssemblyName)</RootNamespace>
     <BaseOutputPath>bin\</BaseOutputPath>
@@ -39,9 +39,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Azure.Kusto.Data" Version="11.3.2" />
-    <PackageReference Include="Microsoft.Azure.Kusto.Language" Version="11.3.24011" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
+    <PackageReference Include="Microsoft.Azure.Kusto.Data" Version="12.2.2" />
+    <PackageReference Include="Microsoft.Azure.Kusto.Language" Version="11.5.6" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
   <ItemGroup>
