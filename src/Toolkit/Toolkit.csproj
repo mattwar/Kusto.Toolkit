@@ -17,20 +17,13 @@
     <Title>$(AssemblyName)</Title>
     <Authors>mattwar</Authors>
     <Description>A library of tools to help you analyze Kusto queries.</Description>
-	<PackageProjectUrl>https://github.com/mattwar/Kushy</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/mattwar/Kushy</PackageProjectUrl>
     <RepositoryUrl>https://github.com/mattwar/Kushy</RepositoryUrl>
     <PackageReadmeFile>NugetReadme.md</PackageReadmeFile>
     <PackageTags>Kusto, KQL, C#, CSharp, DOTNET</PackageTags>
     <PackageLicenseExpression> Apache-2.0</PackageLicenseExpression>
     <Copyright>Copyright (c) Matt Warren 2022</Copyright>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-    <NoWarn>1701;1702;CS1591</NoWarn>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-    <NoWarn>1701;1702;CS1591</NoWarn>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
