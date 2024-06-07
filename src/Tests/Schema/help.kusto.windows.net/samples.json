@@ -107,6 +107,11 @@
     {
       "Name": "demo_series1",
       "Schema": "(id: string, x: dynamic, y: dynamic)"
+    },
+    {
+      "Name": "demo_monthly_ts",
+      "Schema": "(key: string, val: real, ts: datetime)",
+      "Description": "Sample time series with business month seasonality and few anomalies"
     }
   ],
   "ExternalTables": [
@@ -358,6 +363,12 @@
       "Parameters": "(x: real)",
       "Body": "{\r\n    let a =  dynamic([0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429]);\r\n    let abs_x = abs(x);\r\n    let t = 1.0/(1.0 + 0.3275911*abs_x);\r\n    let y = 1.0 - (((((a[4]*t + a[3])*t) + a[2])*t + a[1])*t + a[0])*t*exp(-x*x);\r\n    iff(x < 0, -y, y)\r\n}",
       "Description": "Calculate Gauss error function"
+    },
+    {
+      "Name": "series_monthly_decompose_anomalies_fl",
+      "Parameters": "(tbl: (_key: string, _date: datetime, _val: real), threshold: real)",
+      "Body": "{\r\n    let _tbl=materialize(tbl\r\n    | extend _year=getyear(_date), _dom = dayofmonth(_date), _moy=monthofyear(_date), _doy=dayofyear(_date)\r\n    | extend _vdoy = 31*(_moy-1)+_dom                  //  virtual day of year (assuming all months have 31 days)\r\n    );\r\n    let median_tbl = _tbl | summarize p50=percentiles(_val, 50) by _key, _dom;\r\n    let keys = _tbl | summarize by _key | extend dummy=1;\r\n    let years = _tbl | summarize by _year | extend dummy=1;\r\n    let vdoys = range _vdoy from 0 to 31*12-1 step 1 | extend _moy=_vdoy/31+1, _vdom=_vdoy%31+1, _vdoy=_vdoy+1 | extend dummy=1\r\n    | join kind=fullouter years on dummy | join kind=fullouter keys on dummy | project-away dummy, dummy1, dummy2;\r\n    vdoys\r\n    | join kind=leftouter _tbl on _key, _year, _vdoy\r\n    | project-away _key1, _year1, _moy1, _vdoy1\r\n    | extend _adoy=31*12*_year+_doy, _vadoy = 31*12*_year+_vdoy\r\n    | partition by _key (as T\r\n        | where _vadoy >= toscalar(T | summarize (_adoy, _vadoy)=arg_min(_adoy, _vadoy) | project _vadoy) and \r\n          _vadoy <= toscalar(T | summarize (_adoy, _vadoy)=arg_max(_adoy, _vadoy) | project _vadoy)\r\n    )\r\n    | join kind=inner median_tbl on _key, $left._vdom == $right._dom\r\n    | extend _vval = coalesce(_val, p50)\r\n    //| order by _key asc, _vadoy asc     //  for debugging\r\n    | make-series _vval=avg(_vval), _date=any(_date) default=datetime(null) on _vadoy step 1 by _key\r\n    | extend (anomalies, score, baseline) = series_decompose_anomalies(_vval, threshold, 31)\r\n    | mv-expand _date to typeof(datetime), _vval to typeof(real), _vadoy to typeof(long), anomalies to typeof(int), score to typeof(real), baseline to typeof(real)\r\n    | project-away _vadoy\r\n    | project-rename _val=_vval\r\n    | where isnotnull(_date)\r\n}",
+      "Description": "Anomaly Detection for daily time series with monthly seasonality"
     }
   ]
 }

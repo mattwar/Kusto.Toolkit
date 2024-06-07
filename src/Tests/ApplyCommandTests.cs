@@ -365,7 +365,7 @@ namespace Tests
             var globals = _globals.AddOrUpdateDatabaseMembers(
                 new TableSymbol("T", "(x: long, y: string)"));
 
-            var globals2 = globals.ApplyCommand(".append T with (extend_schema=true) <| T extend z=1.0");
+            var globals2 = globals.ApplyCommand(".append T with (extend_schema=true) <| T | extend z=1.0");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
             Assert.AreEqual("(x: long, y: string, z: real)", t.ToTestString());
@@ -894,7 +894,7 @@ namespace Tests
         {
             var globals = _globals.ApplyCommands(
                 ".create table T (x: long, y: string)",
-                ".set T2 <| T extend z=1.0");
+                ".set T2 <| T | extend z=1.0");
 
             var t = globals.Database.GetTable("T");
             Assert.IsNotNull(t);
