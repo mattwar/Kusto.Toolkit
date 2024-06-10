@@ -353,6 +353,8 @@ namespace Tests
             var globals = _globals.AddOrUpdateDatabaseMembers(
                 new TableSymbol("T", "(x: long, y: string)"));
 
+            // append only extends schema of original table if with (extend_schema=true) is used 
+            // so this command will not result is the table's schema changing.
             var globals2 = globals.ApplyCommand(".append T <| T | extend z=1.0");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
@@ -360,11 +362,12 @@ namespace Tests
         }
 
         [TestMethod]
-        public void TestAppendTable_extend()
+        public void TestAppendTable_extend_schema()
         {
             var globals = _globals.AddOrUpdateDatabaseMembers(
                 new TableSymbol("T", "(x: long, y: string)"));
 
+            // append only extends schema of original table if with (extend_schema=true) is used 
             var globals2 = globals.ApplyCommand(".append T with (extend_schema=true) <| T | extend z=1.0");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
