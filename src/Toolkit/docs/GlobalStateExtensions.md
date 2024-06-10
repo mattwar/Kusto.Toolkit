@@ -45,7 +45,7 @@ To apply more than one command a time, in order, use `GlobalState.ApplyCommands`
 ```csharp
 var globals = _globals.ApplyCommands(
     ".create table T (x: long, y: string)",
-    ".set T2 <| T extend z=1.0");
+    ".set T2 <| T | extend z=1.0");
 ```
 
 *note: it is also possible to apply more than one command at a time by applying a single execute script command.*

@@ -353,7 +353,7 @@ namespace Tests
             var globals = _globals.AddOrUpdateDatabaseMembers(
                 new TableSymbol("T", "(x: long, y: string)"));
 
-            var globals2 = globals.ApplyCommand(".append T <| T extend z=1.0");
+            var globals2 = globals.ApplyCommand(".append T <| T | extend z=1.0");
             var t = globals2.Database.GetTable("T");
             Assert.IsNotNull(t);
             Assert.AreEqual("(x: long, y: string)", t.ToTestString());
