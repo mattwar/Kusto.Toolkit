@@ -1,35 +1,61 @@
-﻿using System;
+﻿using Kusto.Language;
+using Kusto.Language.Editor;
+using Kusto.Language.Symbols;
+using Kusto.Language.Syntax;
+using Kusto.Language.Utils;
+using Microsoft.Identity.Client.NativeInterop;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
-using Kusto.Language;
-using Kusto.Language.Symbols;
-using Kusto.Language.Editor;
-using Kusto.Language.Syntax;
 
 namespace Kusto.Toolkit
 {
+
+    public enum ApplyKind
+    {
+        /// <summary>
+        /// All failures reported
+        /// </summary>
+        Strict,
+
+        /// <summary>
+        /// Skip all commands do not modified schema (cannot be applied)
+        /// </summary>
+        SkipUnhandled, 
+
+        /// <summary>
+        /// Skip all apply failures
+        /// </summary>
+        SkipFailures
+    }
+
     public static partial class GlobalStateExtensions
     {
         /// <summary>
         /// Returns a new <see cref="GlobalState"/> modified by the commands in order.
         /// The default cluster and database must already be set or no nothing will be applied.
         /// </summary>
-        public static GlobalState ApplyCommands(this GlobalState globals, IEnumerable<string> commands)
+        public static ApplyCommandResult ApplyCommands(this GlobalState globals, IEnumerable<string> commands, ApplyKind kind = ApplyKind.Strict)
         {
+            ApplyCommandResult result = null!;
+
             foreach (var command in commands)
             {
-                globals = globals.ApplyCommand(command);
+                result = globals.ApplyCommand(command, kind);
+                if (!result.Succeeded)
+                    return result;
+                globals = result.Globals;
             }
 
-            return globals;
+            return result;
         }
 
         /// <summary>
         /// Returns a new <see cref="GlobalState"/> modified by the commands in order.
         /// The default cluster and database must already be set or no nothing will be applied.
         /// </summary>
-        public static GlobalState ApplyCommands(this GlobalState globals, params string[] commands)
+        public static ApplyCommandResult ApplyCommands(this GlobalState globals, params string[] commands)
         {
             return globals.ApplyCommands((IEnumerable<string>)commands);
         }
@@ -38,22 +64,43 @@ namespace Kusto.Toolkit
         /// Returns a new <see cref="GlobalState"/> modified by the command.
         /// The default cluster and database must already be set or no nothing will be applied.
         /// </summary>
-        public static GlobalState ApplyCommand(this GlobalState globals, string command)
+        public static ApplyCommandResult ApplyCommand(this GlobalState globals, string command, ApplyKind kind = ApplyKind.Strict)
+        {
+            var result = ApplyCommandInternal(globals, command, kind);
+
+            if (!result.Succeeded && kind == ApplyKind.SkipFailures)
+                return new ApplyCommandResult(globals);
+
+            return result;
+        }
+
+        private static ApplyCommandResult ApplyCommandInternal(GlobalState globals, string command, ApplyKind kind)
         {
             // cannot add members to unknown cluster or database
             if (globals.Cluster == ClusterSymbol.Unknown
                 || globals.Database == DatabaseSymbol.Unknown)
-                return globals;
+                return new ApplyCommandResult(globals, command, Diagnostics.GetNoCurrentDatabase());
 
-            // if not a command, then it is not a schema altering command
+            // if is not a command
             if (KustoCode.GetKind(command) != CodeKinds.Command)
-                return globals;
-
+                return new ApplyCommandResult(globals, command, Diagnostics.GetCommandTextIsNotCommandDiagnostic());
+ 
+            // don't analyze to avoid failures on commands that incorrectly use name-references for declarations
             var code = KustoCode.Parse(command, globals);
-            var commandRoot = code.Syntax.GetFirstDescendant<CustomCommand>();
-            if (commandRoot == null)
-                return globals;
 
+            var errors = GetErrors(code.GetDiagnostics());
+
+            // we have syntax errors
+            if (errors.Count > 0)
+                return GetErrorResult(code, errors);
+
+            var commandRoot = code.Syntax.GetFirstDescendant<CustomCommand>();
+
+            // we do not have a recognizable command.. it may not be a legal command or may be only partial
+            if (commandRoot == null)
+                return new ApplyCommandResult(globals, command, Diagnostics.GetCommandNotRecognized());
+
+            // handle all known schema altering commands that affect globals
             return commandRoot.CommandKind switch
             {
                 // functions
@@ -65,6 +112,10 @@ namespace Kusto.Toolkit
                     ApplyCreateOrAlterFunction(code, commandRoot),
                 nameof(EngineCommands.AlterFunctionDocString) =>
                     ApplyAlterFunctionDocString(code, commandRoot),
+                nameof(EngineCommands.DropFunction) =>
+                    ApplyDropFunction(code, commandRoot),
+                nameof(EngineCommands.DropFunctions) =>
+                    ApplyDropFunctions(code, commandRoot),
 
                 // tables
                 nameof(EngineCommands.CreateTable) or
@@ -89,7 +140,7 @@ namespace Kusto.Toolkit
                 nameof(EngineCommands.DropTable) =>
                     ApplyDropTable(code, commandRoot),
                 nameof(EngineCommands.DropTables) =>
-                    ApplyDropTables(code, commandRoot),
+                    ApplyDropTable(code, commandRoot),
                 nameof(EngineCommands.SetTable) =>
                     ApplySetTable(code, commandRoot),
                 nameof(EngineCommands.SetOrAppendTable) =>
@@ -111,9 +162,9 @@ namespace Kusto.Toolkit
                 nameof(EngineCommands.RenameColumns) =>
                     ApplyRenameColumns(code, commandRoot),
                 nameof(EngineCommands.AlterTableColumnDocStrings) =>
-                    ApplyAlterTableColumnDocStrings(code, commandRoot),
+                    ApplyAlterTableColumnDocStrings(code, commandRoot, isMerge: false),
                 nameof(EngineCommands.AlterMergeTableColumnDocStrings) =>
-                    ApplyAlterMergeTableColumnDocStrings(code, commandRoot),
+                    ApplyAlterTableColumnDocStrings(code, commandRoot, isMerge: true),
 
                 // external tables
                 nameof(EngineCommands.CreateStorageExternalTable) or
@@ -147,730 +198,1077 @@ namespace Kusto.Toolkit
                 // scripts
                 nameof(EngineCommands.ExecuteDatabaseScript) =>
                     ApplyExecuteDatabaseScript(code, commandRoot),
-                _ => globals
+
+                _ => kind == ApplyKind.SkipUnhandled
+                        ? new ApplyCommandResult(code.Globals)
+                        : new ApplyCommandResult(code.Globals, code.Text, Diagnostics.GetUnhandledCommandKind(commandRoot.CommandKind))
             };
         }
 
-        private static GlobalState ApplyCreateFunction(KustoCode code, CustomCommand commandRoot)
+        private static IReadOnlyList<Diagnostic> GetErrors(IReadOnlyList<Diagnostic> diagnostics)
         {
-            var name = GetNameWithTag(commandRoot, "FunctionName");
-            var parameters = commandRoot.GetFirstDescendant<FunctionParameters>()?.ToString();
-            var body = commandRoot.GetFirstDescendant<FunctionBody>()?.ToString();
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
-
-            if (name != null && parameters != null && body != null
-                && code.Globals.Database.GetFunction(name) == null)
+            if (diagnostics.Count > 0 && diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
             {
-                var newFunction = new FunctionSymbol(name, parameters, body, docstring);
-                return code.Globals.AddOrUpdateDatabaseMembers(newFunction);
+                if (diagnostics.All(d => d.Severity == DiagnosticSeverity.Error))
+                    return diagnostics;
+                return diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToReadOnly();
             }
 
-            return code.Globals;
+            return Array.Empty<Diagnostic>();
         }
 
-        private static GlobalState ApplyAlterFunction(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult GetErrorResult(KustoCode code, IReadOnlyList<Diagnostic> errors)
         {
-            var name = GetNameAt(commandRoot, e =>
-                ((PreviousTokenIs(e, "function") && GetName(e) != "with")
-                    || (PreviousTokenIs(e, ")") && NextTokenIs(e, "(")))
-                  && GetName(e) != null);
-            var parameters = commandRoot.GetFirstDescendant<FunctionParameters>()?.ToString();
-            var body = commandRoot.GetFirstDescendant<FunctionBody>()?.ToString();
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
-
-            if (name != null && parameters != null && body != null
-                && code.Globals.Database.GetFunction(name) != null)
-            {
-                var newFunction = new FunctionSymbol(name, parameters, body, docstring);
-                return code.Globals.AddOrUpdateDatabaseMembers(newFunction);
-            }
-
-            return code.Globals;
+            return new ApplyCommandResult(code.Globals, code.Text, new[] { Diagnostics.GetCommandHasErrors() }.Concat(errors).ToArray());
         }
 
-        private static GlobalState ApplyCreateOrAlterFunction(KustoCode code, CustomCommand commandRoot)
+        private static bool HasIfNotExists(CustomCommand commandRoot)
         {
-            var name = GetNameAt(commandRoot, e => 
-                ((PreviousTokenIs(e, "function") && GetName(e) != "with") 
-                    || (PreviousTokenIs(e, ")") && NextTokenIs(e, "(")))
-                  && GetName(e) != null);
-            var parameters = commandRoot.GetFirstDescendant<FunctionParameters>()?.ToString();
-            var body = commandRoot.GetFirstDescendant<FunctionBody>()?.ToString();
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
-
-            if (name != null && parameters != null && body != null)
-            {
-                var newFunction = new FunctionSymbol(name, parameters, body, docstring);
-                return code.Globals.AddOrUpdateDatabaseMembers(newFunction);
-            }
-
-            return code.Globals;
+            return commandRoot.GetFirstDescendant<SyntaxToken>(tk => tk.Text == "ifnotexists") != null;
         }
 
-        private static GlobalState ApplyAlterFunctionDocString(KustoCode code, CustomCommand commandRoot)
+        private static bool HasIfExists(CustomCommand commandRoot)
         {
-            var name = GetNameAfterToken(commandRoot, "function");
-            var description = GetLiteralValueAfterToken(commandRoot, "docstring");
-            if (name != null && description != null
-                && code.Globals.Database.GetFunction(name) is FunctionSymbol fn)
-            {
-                var newFn = fn.WithDescription(description);
-                return code.Globals.AddOrUpdateDatabaseMembers(newFn);
-            }
-
-            return code.Globals;
+            return commandRoot.GetFirstDescendant<SyntaxToken>(tk => tk.Text == "ifexists") != null;
         }
 
-        private static GlobalState ApplyCreateTable(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult GetMissingSyntaxResult(KustoCode code, SyntaxElement? location = null)
         {
-            var nameElements = GetElementsWithTag(commandRoot, "TableName");
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
+            var dx = Diagnostics.GetCommandHasMissingSyntax();
+            if (location != null)
+                dx = dx.WithLocation(location);
+            return new ApplyCommandResult(code.Globals, code.Text, dx);
+        }
 
-            var newTables = nameElements.Select(nn =>
+        private static ApplyCommandResult GetEntityDoesNotExistResult(KustoCode code, string entityKind, string entityName, SyntaxElement? location = null)
+        {
+            var dx = Diagnostics.GetEntityDoesNotExist(entityKind, entityName);
+            if (location != null)
+                dx = dx.WithLocation(location);
+            return new ApplyCommandResult(code.Globals, code.Text, dx);
+        }
+
+        public static ApplyCommandResult GetEntityAlreadyExistsResult(KustoCode code, string entityKind, string entityName, SyntaxElement? location = null)
+        {
+            var dx = Diagnostics.GetEntityAlreadyExists(entityKind, entityName);
+            if (location != null)
+                dx = dx.WithLocation(location);
+            return new ApplyCommandResult(code.Globals, code.Text, dx);
+        }
+
+        #region Functions
+        private static ApplyCommandResult ApplyCreateFunction(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameWithTag(commandRoot, "FunctionName") is { } name
+                && commandRoot.GetFirstDescendant<FunctionParameters>()?.ToString() is { } parameters
+                && commandRoot.GetFirstDescendant<FunctionBody>()?.ToString() is { } body
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
             {
-                var name = GetName(nn);
-                var schema = GetSchemaAfterElement(code, nn);
-                if (schema != null)
+                if (code.Globals.Database.GetFunction(name) is null)
                 {
-                    return new TableSymbol(name, schema, docstring);
+                    var newFunction = new FunctionSymbol(name, parameters, body, docstring);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newFunction);
+                    return new ApplyCommandResult(newGlobals);
                 }
-                return null;
-            })
-            .Where(nt => nt != null)
-            .ToList();
-
-            return code.Globals.AddOrUpdateDatabaseMembers(newTables!);
+                else if (HasIfNotExists(commandRoot))
+                {
+                    // succeed with no change
+                    return new ApplyCommandResult(code.Globals);
+                }
+                else
+                {
+                    // ifnotexists not specified so this is an error
+                    return GetEntityAlreadyExistsResult(code, "function", name);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
         }
 
-        private static GlobalState ApplyCreateMergeTable(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyAlterFunction(KustoCode code, CustomCommand commandRoot)
         {
-            var nameElements = GetElementsWithTag(commandRoot, "TableName");
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
-
-            var newTables = nameElements.Select(ne =>
+            if (GetNameWithTag(commandRoot, "FunctionName") is string name
+                && commandRoot.GetFirstDescendant<FunctionParameters>()?.ToString() is { } parameters
+                && commandRoot.GetFirstDescendant<FunctionBody>()?.ToString() is { } body
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
             {
-                var name = GetName(ne);
-
-                var schema = GetSchemaAfterElement(code, ne);
-                if (schema != null)
+                // if function already exists, alter it
+                if (code.Globals.Database.GetFunction(name) != null)
                 {
-                    var newTable = new TableSymbol(name, schema, docstring);
+                    var newFunction = new FunctionSymbol(name, parameters, body, docstring);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newFunction);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    // function does not exists, so error
+                    return GetEntityDoesNotExistResult(code, "function", name);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
 
-                    if (code.Globals.Database.GetTable(name) is TableSymbol existingTable)
+        private static ApplyCommandResult ApplyDropFunction(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameWithTag(commandRoot, "FunctionName") is string name)
+            {
+                if (code.Globals.Database.GetFunction(name) is { } fn)
+                {
+                    var newGlobals = code.Globals.RemoveDatabaseMembers(fn);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else if (HasIfExists(commandRoot))
+                {
+                    // succeed with no change
+                    return new ApplyCommandResult(code.Globals);
+                }
+                else
+                {
+                    // error because function does not exist
+                    return GetEntityDoesNotExistResult(code, "function", name);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyDropFunctions(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNamesWithTag(commandRoot, "FunctionName") is { } names
+                && names.Count > 0)
+            {
+                var fns = names.Select(n => code.Globals.Database.GetFunction(n)).Where(f => f != null).ToList();
+                if (fns.Count == names.Count || HasIfExists(commandRoot))
+                {
+                    var newGlobals = code.Globals.RemoveDatabaseMembers(fns);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    // error because function does not exist
+                    var missingNames = names.Except(fns.Select(f => f.Name)).ToList();
+                    return GetEntityDoesNotExistResult(code, "function", missingNames[0]);
+                }
+            }
+            else
+
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyCreateOrAlterFunction(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameWithTag(commandRoot, "FunctionName") is string name
+                && commandRoot.GetFirstDescendant<FunctionParameters>()?.ToString() is { } parameters
+                && commandRoot.GetFirstDescendant<FunctionBody>()?.ToString() is { } body
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
+            {
+                var newFunction = new FunctionSymbol(name, parameters, body, docstring);
+                return new ApplyCommandResult(code.Globals.AddOrUpdateDatabaseMembers(newFunction));
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyAlterFunctionDocString(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameAfterToken(commandRoot, "function") is string name
+                && GetLiteralValueAfterToken(commandRoot, "docstring") is string description)
+            {
+                // function exists?
+                if (code.Globals.Database.GetFunction(name) is { } fn)
+                {
+                    var newFn = fn.WithDescription(description);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newFn);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "function", name);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+        #endregion
+
+        #region Tables
+        private static ApplyCommandResult ApplyCreateTable(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementsWithTag(commandRoot, "TableName") is { } nameElements
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
+            {
+                var newTables = new List<TableSymbol>();
+                foreach (var nn in nameElements)
+                {
+                    if (GetName(nn) is string name
+                        && GetSchemaAfterElement(code, nn) is { } schema)
                     {
-                        var mergedColumns = MergeColumns(existingTable.Columns, newTable.Columns);
-                        if (mergedColumns != existingTable.Columns)
+                        if (code.Globals.Database.GetTable(name) == null)
                         {
-                            docstring = docstring ?? existingTable.Description;
-                            return new TableSymbol(name, mergedColumns, docstring);
+                            newTables.Add(new TableSymbol(name, schema, docstring));
+                        }
+                        else
+                        {
+                            // table already exists
+                            return GetEntityAlreadyExistsResult(code, "table", name, nn);
                         }
                     }
                     else
                     {
-                        return newTable;
+                        // missing schema
+                        return GetMissingSyntaxResult(code, nn);
                     }
                 }
 
-                return null;
-            })
-            .Where(nt => nt != null)
-            .ToList();
-
-            return code.Globals.AddOrUpdateDatabaseMembers(newTables!);
-        }
-
-        private static GlobalState ApplyCreateTableBaseOnAnotherTable(KustoCode code, CustomCommand commandRoot)
-        {
-            var existingTableName = GetNameWithTag(commandRoot, "TableName");
-            var newTableName = GetNameWithTag(commandRoot, "NewTableName");
-
-            if (existingTableName != null
-                && newTableName != null
-                && code.Globals.Database.GetTable(existingTableName) is TableSymbol existingTableSymbol)
-            {
-                var newTableSymbol = existingTableSymbol.WithName(newTableName);
-                return code.Globals.AddOrUpdateDatabaseMembers(newTableSymbol);
+                var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTables);
+                return new ApplyCommandResult(newGlobals);
             }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyAlterTable(KustoCode code, CustomCommand commandRoot)
-        {
-            var tableNameNode = GetElementAfterToken(commandRoot, "table");
-            var tableName = GetName(tableNameNode);
-            var tableSchema = GetSchemaAfterElement(code, tableNameNode);
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
-
-            if (tableName != null
-                && tableSchema != null
-                && code.Globals.Database.GetTable(tableName) is TableSymbol existingTable)
+            else
             {
-                var newTable = new TableSymbol(tableName, tableSchema, docstring ?? existingTable.Description);
-                return code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                return GetMissingSyntaxResult(code);
             }
-
-            return code.Globals;
         }
 
-        private static GlobalState ApplyAlterMergeTable(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyCreateMergeTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tableNameNode = GetElementAfterToken(commandRoot, "table");
-            var tableName = GetName(tableNameNode);
-            var tableSchema = GetSchemaAfterElement(code, tableNameNode);
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
+            if (GetElementsWithTag(commandRoot, "TableName") is { } nameElements
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
+            {
+                var newTables = new List<TableSymbol>();
+                foreach (var nn in nameElements)
+                {
+                    var name = GetName(nn);
+                    var schema = GetSchemaAfterElement(code, nn);
+                    if (schema == null)
+                    {
+                        // missing schema
+                        return GetMissingSyntaxResult(code, nn);
+                    }
 
-            if (tableName != null
-                && tableSchema != null)
+                    var newTable = new TableSymbol(name, schema, docstring);
+
+                    if (code.Globals.Database.GetTable(name) is { } existingTable)
+                    {
+                        // merge with existing table
+                        var mergedColumns = MergeColumns(existingTable.Columns, newTable.Columns);
+                        if (mergedColumns != existingTable.Columns)
+                        {
+                            docstring = docstring ?? existingTable.Description;
+                            newTable = new TableSymbol(name, mergedColumns, docstring);
+                        }
+                        else
+                        {
+                            return new ApplyCommandResult(code.Globals, code.Text, Diagnostics.GetMergeFailed());
+                        }
+                    }
+
+                    newTables.Add(newTable);
+                }
+
+                var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTables);
+                return new ApplyCommandResult(newGlobals);
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyCreateTableBaseOnAnotherTable(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameWithTag(commandRoot, "TableName") is { } tableName
+                && GetNameWithTag(commandRoot, "NewTableName") is { } newTableName)
+            {
+                if (code.Globals.Database.GetTable(tableName) is { } existingTableSymbol)
+                {
+                    if (code.Globals.Database.GetTable(newTableName) == null)
+                    {
+                        var newTableSymbol = existingTableSymbol.WithName(newTableName);
+                        var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTableSymbol);
+                        return new ApplyCommandResult(newGlobals);
+                    }
+                    else if (HasIfNotExists(commandRoot))
+                    {
+                        // target table already exists but ifnotexists was specified
+                        return new ApplyCommandResult(code.Globals);
+                    }
+                    else
+                    {
+                        return GetEntityAlreadyExistsResult(code, "table", newTableName);
+                    }
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "table", tableName);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyAlterTable(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementAfterToken(commandRoot, "table") is { } tableNameNode
+                && GetName(tableNameNode) is { } tableName
+                && GetSchemaAfterElement(code, tableNameNode) is { } tableSchema
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
+            {
+                if (code.Globals.Database.GetTable(tableName) is { } existingTable)
+                {
+                    var newTable = new TableSymbol(tableName, tableSchema, docstring ?? existingTable.Description);
+                    return new ApplyCommandResult(code.Globals.AddOrUpdateDatabaseMembers(newTable));
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "table", tableName, tableNameNode);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyAlterMergeTable(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementAfterToken(commandRoot, "table") is { } tableNameNode
+                && GetName(tableNameNode) is { } tableName
+                && GetSchemaAfterElement(code, tableNameNode) is { } tableSchema
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
             {
                 var newTable = new TableSymbol(tableName, tableSchema, docstring);
 
                 if (code.Globals.Database.GetTable(tableName) is TableSymbol existingTable)
                 {
                     var mergedColumns = MergeColumns(existingTable.Columns, newTable.Columns);
-                    if (mergedColumns != existingTable.Columns)
-                    {
-                        var mergedTable = new TableSymbol(tableName, mergedColumns, docstring ?? existingTable.Description);
-                        return code.Globals.AddOrUpdateDatabaseMembers(mergedTable);
-                    }
+                    var mergedTable = new TableSymbol(tableName, mergedColumns, docstring ?? existingTable.Description);
+                    return new ApplyCommandResult(code.Globals.AddOrUpdateDatabaseMembers(mergedTable));
                 }
                 else
                 {
-                    return code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return GetEntityDoesNotExistResult(code, "table", tableName, tableNameNode);
                 }
             }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyAlterTableDocString(KustoCode code, CustomCommand commandRoot)
-        {
-            var tableName = GetNameWithTag(commandRoot, "TableName");
-            var docString = GetLiteralValueWithTag(commandRoot, "Documentation");
-
-            if (tableName != null
-                && docString != null
-                && code.Globals.Database.GetTable(tableName) is TableSymbol ts)
+            else
             {
-                var newTable = ts.WithDescripton(docString);
-                return code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                return GetMissingSyntaxResult(code);
             }
-
-            return code.Globals;
         }
 
-        private static GlobalState ApplyRenameTable(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyAlterTableDocString(KustoCode code, CustomCommand commandRoot)
         {
-            var existingTableNameElements = GetElementsWithTag(commandRoot, "TableName");
-
-            var replacements = existingTableNameElements.Select(ne =>
+            if (GetNameWithTag(commandRoot, "TableName") is { } tableName
+                && GetLiteralValueWithTag(commandRoot, "Documentation") is { } docstring)
             {
-                var tableName = GetName(ne);
-                var newTableName = GetNameWithTag(ne.Parent, "NewTableName");
-
-                if (tableName != null && newTableName != null
-                    && code.Globals.Database.GetTable(tableName) is TableSymbol existingTable)
+                if (code.Globals.Database.GetTable(tableName) is TableSymbol ts)
                 {
-                    return (existingTable, existingTable.WithName(newTableName));
+                    var newTable = ts.WithDescripton(docstring);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "table", tableName);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyRenameTable(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementsWithTag(commandRoot, "TableName") is { } tableNameElements)
+            {
+                var replacements = new List<(TableSymbol original, TableSymbol replacement)>();
+
+                foreach (var ne in tableNameElements)
+                {
+                    // get the table name for this name node and corresponding new table name
+                    if (GetName(ne) is { } tableName
+                        && GetNameWithTag(ne.Parent, "NewTableName") is { } newTableName)
+                    {
+                        if (code.Globals.Database.GetTable(tableName) is TableSymbol table)
+                        {
+                            if (code.Globals.Database.GetTable(newTableName) == null)
+                            {
+                                var newTable = table.WithName(newTableName);
+                                replacements.Add((original: table, replacement: newTable));
+                            }
+                            else
+                            {
+                                return GetEntityAlreadyExistsResult(code, "table", newTableName);
+                            }
+                        }
+                        else
+                        {
+                            return GetEntityDoesNotExistResult(code, "table", tableName);
+                        }
+                    }
+                    else
+                    {
+                        return GetMissingSyntaxResult(code);
+                    }
                 }
 
-                return default;
-            })
-            .Where(nt => nt != default)
-            .ToList();
-
-            return code.Globals.ReplaceDatabaseMembers(replacements);
+                var newGlobals = code.Globals.ReplaceDatabaseMembers(replacements);
+                return new ApplyCommandResult(newGlobals);
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
         }
 
-        private static GlobalState ApplyDropTable(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyDropTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tables = GetNamesWithTag(commandRoot, "TableName")
-                .Select(n => code.Globals.Database.GetTable(n))
-                .Where(t => t != null)
-                .ToList();
-            return code.Globals.RemoveDatabaseMembers(tables);
+            if (GetNamesWithTag(commandRoot, "TableName") is { } tableNames)
+            {
+                var hasIfExits = HasIfExists(commandRoot);
+                var tables = new List<TableSymbol>();
+                foreach (var n in tableNames)
+                {
+                    if (code.Globals.Database.GetTable(n) is TableSymbol table)
+                    {
+                        tables.Add(table);
+                    }
+                    else if (!hasIfExits)
+                    {
+                        return new ApplyCommandResult(code.Globals, code.Text, Diagnostics.GetEntityDoesNotExist("table", n));
+                    }
+                }
+                var newGlobals = code.Globals.RemoveDatabaseMembers(tables);
+                return new ApplyCommandResult(newGlobals);
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
         }
 
-        private static GlobalState ApplyDropTables(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplySetTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tables = GetElementsAt(commandRoot, e => (PreviousTokenIs(e, "(") || PreviousTokenIs(e, ",")) && GetName(e) != null)
-                .Select(e => GetName(e))
-                .Where(n => n != null)
-                .Distinct()
-                .Select(n => code.Globals.Database.GetTable(n))
-                .Where(t => t != null)
-                .ToList();
-            return code.Globals.RemoveDatabaseMembers(tables);
-        }
-
-        private static GlobalState ApplySetTable(KustoCode code, CustomCommand commandRoot)
-        {
-            var tableName = GetNameAt(commandRoot, e => PreviousTokenIs(e, "set") || PreviousTokenIs(e, "async"));
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
-
-            if (tableName != null
+            if (GetNameWithTag(commandRoot, "TableName") is { } tableName
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring
                 && GetInputResult(code) is TableSymbol inputSchema)
             {
                 if (code.Globals.Database.GetTable(tableName) == null)
                 {
                     var newTable = inputSchema.WithName(tableName).WithDescripton(docstring);
-                    return code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return new ApplyCommandResult(newGlobals);
                 }
-            }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyAppendTable(KustoCode code, CustomCommand commandRoot)
-        {
-            var tableName = GetNameAt(commandRoot, e => PreviousTokenIs(e, "append") || PreviousTokenIs(e, "async"));
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
-            var extend = GetPropertyValue(commandRoot, "extend_schema", false);
-
-            if (tableName != null
-                && code.Globals.Database.GetTable(tableName) is TableSymbol existingTable)
-            {
-                var newTable = existingTable.WithDescripton(docstring ?? existingTable.Description);
-
-                if (extend && GetInputResult(code) is TableSymbol inputResult)
+                else
                 {
-                    newTable = newTable.WithColumns(ExtendColumns(existingTable.Columns, inputResult.Columns));
+                    return GetEntityAlreadyExistsResult(code, "table", tableName);
                 }
-
-                return code.Globals.AddOrUpdateDatabaseMembers(newTable);
             }
-
-            return code.Globals;
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
         }
 
-        private static GlobalState ApplySetOrAppendTable(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyAppendTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = GetNameAt(commandRoot, e => PreviousTokenIs(e, "set-or-append") || PreviousTokenIs(e, "async"));
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
-            var extend = GetPropertyValue(commandRoot, "extend_schema", false);
-
-            if (tableName != null)
+            if (GetNameAt(commandRoot, e => PreviousTokenIs(e, "append") || PreviousTokenIs(e, "async")) is string tableName
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring
+                && GetPropertyValue(commandRoot, "extend_schema", false) is bool extendSchema
+                && GetInputResult(code) is TableSymbol inputResult)
             {
-                var existingTable = code.Globals.Database.GetTable(tableName);
-
-                if (existingTable != null)
+                if (code.Globals.Database.GetTable(tableName) is TableSymbol existingTable)
                 {
                     var newTable = existingTable.WithDescripton(docstring ?? existingTable.Description);
 
-                    if (extend && GetInputResult(code) is TableSymbol inputResult)
+                    if (extendSchema)
                     {
                         newTable = newTable.WithColumns(ExtendColumns(existingTable.Columns, inputResult.Columns));
                     }
 
-                    return code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return new ApplyCommandResult(newGlobals);
                 }
-                else if (GetInputResult(code) is TableSymbol inputResult)
+                else
                 {
-                    var newTable = inputResult.WithName(tableName).WithDescripton(docstring);
-                    return code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return GetEntityDoesNotExistResult(code, "table", tableName);
                 }
             }
-
-            return code.Globals;
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
         }
 
-        private static GlobalState ApplySetOrReplaceTable(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplySetOrAppendTable(KustoCode code, CustomCommand commandRoot)
         {
-            var tableName = GetNameAt(commandRoot, e => PreviousTokenIs(e, "set-or-replace") || PreviousTokenIs(e, "async"));
-            var docstring = GetPropertyValueText(commandRoot, "docstring");
-            var extend = GetPropertyValue(commandRoot, "extend_schema", false);
-            var recreate = GetPropertyValue(commandRoot, "recreate_schema", false);
-
-            if (tableName != null)
+            if (GetNameAt(commandRoot, e => PreviousTokenIs(e, "set-or-append") || PreviousTokenIs(e, "async")) is string tableName
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring
+                && GetPropertyValue(commandRoot, "extend_schema", false) is bool extendSchema
+                && GetInputResult(code) is TableSymbol inputResult)
             {
-                var existingTable = code.Globals.Database.GetTable(tableName);
-
-                if (existingTable != null)
+                if (code.Globals.Database.GetTable(tableName) is TableSymbol existingTable)
                 {
                     var newTable = existingTable.WithDescripton(docstring ?? existingTable.Description);
-                    var inputResult = GetInputResult(code) as TableSymbol;
 
-                    if (recreate && inputResult != null)
+                    if (extendSchema)
+                    {
+                        newTable = newTable.WithColumns(ExtendColumns(existingTable.Columns, inputResult.Columns));
+                    }
+
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    var newTable = inputResult.WithName(tableName).WithDescripton(docstring);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return new ApplyCommandResult(newGlobals);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplySetOrReplaceTable(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameAt(commandRoot, e => PreviousTokenIs(e, "set-or-replace") || PreviousTokenIs(e, "async")) is string tableName
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring
+                && GetPropertyValue(commandRoot, "extend_schema", false) is bool extendSchema
+                && GetPropertyValue(commandRoot, "recreate_schema", false) is bool recreate
+                && GetInputResult(code) is TableSymbol inputResult)
+            {
+                if (code.Globals.Database.GetTable(tableName) is TableSymbol existingTable)
+                {
+                    var newTable = existingTable.WithDescripton(docstring ?? existingTable.Description);
+                    if (recreate)
                     {
                         newTable = newTable.WithColumns(inputResult.Columns);
                     }
-                    else if (extend && inputResult != null)
+                    else if (extendSchema && inputResult != null)
                     {
                         newTable = newTable.WithColumns(ExtendColumns(existingTable.Columns, inputResult.Columns));
                     }
 
-                    return code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return new ApplyCommandResult(newGlobals);
                 }
-                else if (GetInputResult(code) is TableSymbol inputResult)
+                else
                 {
                     var newTable = inputResult.WithName(tableName).WithDescripton(docstring);
-                    return code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return new ApplyCommandResult(newGlobals);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+#endregion
+
+        #region Columns
+
+        private static ApplyCommandResult ApplyAlterColumnType(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementWithTag(commandRoot, "ColumnName") is { } columnNameElement
+                && GetElementWithTag(commandRoot, "ColumnType") is { } columnTypeElement
+                && GetColumnType(columnTypeElement) is ScalarSymbol columnType
+                && TryGetDatabaseTableAndColumnNames(columnNameElement, out var databaseName, out var tableName, out var columnName))
+            {
+                var database = (databaseName == null)
+                    ? code.Globals.Database 
+                    : code.Globals.Cluster.GetDatabase(databaseName);
+                if (database == null)
+                    return GetEntityDoesNotExistResult(code, "database", databaseName!);
+                var table = database.GetTable(tableName);
+                if (table == null)
+                    return GetEntityDoesNotExistResult(code, "table", tableName!);
+                if (!table.TryGetColumn(columnName, out var column))
+                    return GetEntityDoesNotExistResult(code, "column", columnName!);
+
+                var newColumn = column.WithType(columnType);
+                var newTable = table.AddOrUpdateColumns(newColumn);
+                var newDatabase = database.AddOrUpdateMembers(newTable);
+                var newGlobals = code.Globals.AddOrUpdateClusterDatabase(newDatabase);
+                return new ApplyCommandResult(newGlobals);
+            }
+
+            return GetMissingSyntaxResult(code);
+        }
+
+
+        private static ApplyCommandResult ApplyDropColumn(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementWithTag(commandRoot, "ColumnName") is { } columnNameElement
+                && TryGetDatabaseTableAndColumnNames(columnNameElement, out var databaseName, out var tableName, out var columnName))
+            {
+                var database = (databaseName == null)
+                    ? code.Globals.Database
+                    : code.Globals.Cluster.GetDatabase(databaseName);
+                if (database == null)
+                    return GetEntityDoesNotExistResult(code, "database", databaseName!);
+                var table = database.GetTable(tableName);
+                if (table == null)
+                    return GetEntityDoesNotExistResult(code, "table", tableName!);
+                if (!table.TryGetColumn(columnName, out var column))
+                    return GetEntityDoesNotExistResult(code, "column", columnName!);
+
+                var newTable = table.RemoveColumns(column!);
+                var newDb = database.AddOrUpdateMembers(newTable);
+                var newGlobals = code.Globals.AddOrUpdateClusterDatabase(newDb);
+                return new ApplyCommandResult(newGlobals);
+            }
+
+            return GetMissingSyntaxResult(code);
+        }
+
+        private static ApplyCommandResult ApplyDropTableColumns(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameWithTag(commandRoot, "TableName") is { } tableName
+                && GetNamesWithTag(commandRoot, "ColumnName") is { } columnNames)
+            {
+                if (code.Globals.Database.GetTable(tableName) is TableSymbol table)
+                {
+                    var columns = new List<ColumnSymbol>();
+                    foreach (var columnName in columnNames)
+                    {
+                        if (table.TryGetColumn(columnName, out var column))
+                        {
+                            columns.Add(column);
+                        }
+                        else
+                        {
+                            return GetEntityDoesNotExistResult(code, "column", columnName);
+                        }
+                    }
+
+                    var newTable = table.RemoveColumns(columns);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "table", tableName);
                 }
             }
 
-            return code.Globals;
+            return GetMissingSyntaxResult(code);
         }
 
-        private static GlobalState ApplyAlterColumnType(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyRenameColumn(KustoCode code, CustomCommand commandRoot)
         {
-            var columnNameElement = GetElementAfterToken(commandRoot, "column");
-            var columnTypeElement = GetElementAfterToken(commandRoot, "=");
-
-            if (columnNameElement != null
-                && columnTypeElement != null
-                && TryGetDatabaseTableAndColumn(code.Globals, columnNameElement, out var database, out var table, out var column)
-                && GetColumnType(columnTypeElement) is ScalarSymbol columnType)
+            if (GetElementWithTag(commandRoot, "ColumnName") is { } columnNameElement
+                && GetNameWithTag(commandRoot, "NewColumnName") is string newColumnName
+                && TryGetDatabaseTableAndColumnNames(columnNameElement, out var databaseName, out var tableName, out var columnName))
             {
-                var newColumn = column!.WithType(columnType);
-                var newTable = table!.AddOrUpdateColumns(newColumn);
-                var newDatabase = database!.AddOrUpdateMembers(newTable);
-                return code.Globals.AddOrUpdateClusterDatabase(newDatabase!);
+                var database = (databaseName == null)
+                    ? code.Globals.Database
+                    : code.Globals.Cluster.GetDatabase(databaseName);
+                if (database == null)
+                    return GetEntityDoesNotExistResult(code, "database", databaseName!);
+                var table = database.GetTable(tableName);
+                if (table == null)
+                    return GetEntityDoesNotExistResult(code, "table", tableName!);
+                if (!table.TryGetColumn(columnName, out var column))
+                    return GetEntityDoesNotExistResult(code, "column", columnName!);
+                if (table.TryGetColumn(newColumnName, out _))
+                    return GetEntityAlreadyExistsResult(code, "column", newColumnName);
+
+                var newColumn = column.WithName(newColumnName);
+                var newTable = table.ReplaceColumns((column, newColumn));
+                var newDb = database.AddOrUpdateMembers(newTable);
+                var newGlobals = code.Globals.AddOrUpdateClusterDatabase(newDb);
+                return new ApplyCommandResult(newGlobals);
             }
 
-            return code.Globals;
+            return GetMissingSyntaxResult(code);
         }
 
-        private static GlobalState ApplyDropColumn(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyRenameColumns(KustoCode code, CustomCommand commandRoot)
         {
-            var columnNameElement = GetElementWithTag(commandRoot, "ColumnName");
-            if (columnNameElement != null
-                && TryGetDatabaseTableAndColumn(code.Globals, columnNameElement, out var database, out var table, out var column))
+            if (GetElementsWithTag(commandRoot, "ColumnName") is { } columnNameElements)
             {
-                var newTable = table!.RemoveColumns(column!);
-                var newDb = database!.AddOrUpdateMembers(newTable);
-                return code.Globals.AddOrUpdateClusterDatabase(newDb);
-            }
+                var globals = code.Globals;
 
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyDropTableColumns(KustoCode code, CustomCommand commandRoot)
-        {
-            var tableName = GetNameWithTag(commandRoot, "TableName");
-
-            if (code.Globals.Database.GetTable(tableName) is TableSymbol table)
-            {
-                var columns = commandRoot
-                    .GetDescendants<NameReference>()
-                    .Skip(1) // skip the table name
-                    .Select(c => table.GetColumn(c.SimpleName))
-                    .Where(c => c != null)
-                    .ToList();
-
-                var newTable = table.RemoveColumns(columns);
-                return code.Globals.AddOrUpdateDatabaseMembers(newTable);
-            }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyRenameColumn(KustoCode code, CustomCommand commandRoot)
-        {
-            var columnNameElement = GetElementWithTag(commandRoot, "ColumnName");
-            var newColumnName = GetNameWithTag(commandRoot, "NewColumnName");
-
-            if (newColumnName != null
-                && columnNameElement != null
-                && TryGetDatabaseTableAndColumn(code.Globals, columnNameElement, out var database, out var table, out var column))
-            {
-                var newColumn = column!.WithName(newColumnName);
-                var newTable = table!.ReplaceColumns((column, newColumn));
-                var newDb = database!.AddOrUpdateMembers(newTable);
-                return code.Globals.AddOrUpdateClusterDatabase(newDb);
-            }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyRenameColumns(KustoCode code, CustomCommand commandRoot)
-        {
-            var columnNameReplacements = GetElementsWithTag(commandRoot, "NewColumnName")
-                .Select(ne =>
+                foreach (var columnNameElement in columnNameElements)
                 {
-                    var equalToken = ne.GetLastToken().GetNextToken();
-                    if (equalToken != null
-                        && equalToken.Kind == SyntaxKind.EqualToken
-                        && GetNextPeer(equalToken) is Expression originalNameNode
-                        && TryGetDatabaseTableAndColumn(code.Globals, originalNameNode,
-                            out var database, out var table, out var column))
+                    if (GetNameWithTag(columnNameElement.Parent, "NewColumnName") is string newColumnName
+                        && TryGetDatabaseTableAndColumnNames(columnNameElement, out var databaseName, out var tableName, out var columnName))
                     {
-                        var newName = GetName(ne);
-                        return (database, table, column, newName);
+                        var database = (databaseName == null)
+                            ? globals.Database
+                            : globals.Cluster.GetDatabase(databaseName);
+                        if (database == null)
+                            return GetEntityDoesNotExistResult(code, "database", databaseName!);
+                        var table = database.GetTable(tableName);
+                        if (table == null)
+                            return GetEntityDoesNotExistResult(code, "table", tableName!);
+                        if (!table.TryGetColumn(columnName, out var column))
+                            return GetEntityDoesNotExistResult(code, "column", columnName!);
+                        if (table.TryGetColumn(newColumnName, out _))
+                            return GetEntityAlreadyExistsResult(code, "column", newColumnName);
+
+                        var cluster = globals.GetCluster(database);
+
+                        var newColumn = column.WithName(newColumnName);
+                        var newTable = table.ReplaceColumns((column, newColumn));
+                        var newDatabase = database.AddOrUpdateMembers(newTable);
+                        globals = globals.AddOrUpdateClusterDatabase(newDatabase);
                     }
                     else
                     {
-                        return default;
+                        return GetMissingSyntaxResult(code, columnNameElement);
                     }
-                })
-                .Where(x => x.column != null)
-                .ToList();
+                }
 
-            var newDbs = columnNameReplacements.GroupBy(x => x.database!)
-                .Select(dbg => 
-                    dbg.Key.AddOrUpdateMembers(
-                        dbg
-                        .GroupBy(x => x.table!)
-                        .Select(tg =>
-                            tg.Key.ReplaceColumns(
-                                tg.Select(x => (x.column!, x.column!.WithName(x.newName!))).ToArray()))))
-                .ToList();
-
-            return code.Globals.AddOrUpdateClusterDatabases(newDbs);
+                return new ApplyCommandResult(globals);
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
         }
 
-        private static GlobalState ApplyAlterTableColumnDocStrings(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyAlterTableColumnDocStrings(KustoCode code, CustomCommand commandRoot, bool isMerge)
         {
-            var tableName = GetNameWithTag(commandRoot, "TableName");
-            if (tableName != null && code.Globals.Database.GetTable(tableName) is TableSymbol table)
+            if (GetNameWithTag(commandRoot, "TableName") is string tableName
+                && GetElementsWithTag(commandRoot, "ColumnName") is { } columnNameElements)
             {
-                var newColumnMap = GetElementsWithTag(commandRoot, "ColumnName")
-                    .Select(cn =>
+                var updatedColumns = new Dictionary<string, ColumnSymbol>();
+
+                if (code.Globals.Database.GetTable(tableName) is TableSymbol table)
+                {
+                    foreach (var columnNameElement in columnNameElements)
                     {
-                        var columnName = GetName(cn);
-                        if (table.Columns.FirstOrDefault(c => c.Name == columnName) is ColumnSymbol column)
+                        if (GetName(columnNameElement) is string columnName
+                            && GetNameWithTag(columnNameElement.Parent, "DocString") is string docstring)
                         {
-                            var colon = cn.GetLastToken().GetNextToken();
-                            if (colon != null && colon.Kind == SyntaxKind.ColonToken)
+                            if (table.TryGetColumn(columnName, out var column))
                             {
-                                var docstring = GetLiteralValueAfterElement(colon);
-                                if (docstring != null)
-                                    return column.WithDescription(docstring);
+                                var updatedColumn = column.WithDescription(docstring);
+                                updatedColumns.Add(column.Name, updatedColumn);
+                            }
+                            else
+                            {
+                                return GetEntityDoesNotExistResult(code, "column", columnName);
                             }
                         }
-
-                        return null;
-                    })
-                    .Where(x => x != null)
-                    .ToDictionary(x => x!.Name);
-
-                var newColumns = table.Columns
-                    .Select(c => newColumnMap.TryGetValue(c.Name, out var newCol) ? newCol : c.WithDescription(""))
-                    .ToList();
-
-                var newTable = table.AddOrUpdateColumns(newColumns!);
-                return code.Globals.AddOrUpdateDatabaseMembers(newTable);
-            }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyAlterMergeTableColumnDocStrings(KustoCode code, CustomCommand commandRoot)
-        {
-            var tableName = GetNameWithTag(commandRoot, "TableName");
-            if (tableName != null && code.Globals.Database.GetTable(tableName) is TableSymbol table)
-            {
-                var newColumns = GetElementsWithTag(commandRoot, "ColumnName")
-                    .Select(cn =>
-                    {
-                        var columnName = GetName(cn);
-                        if (table.Columns.FirstOrDefault(c => c.Name == columnName) is ColumnSymbol column)
+                        else
                         {
-                            var colon = cn.GetLastToken().GetNextToken();
-                            if (colon != null && colon.Kind == SyntaxKind.ColonToken)
+                            return GetMissingSyntaxResult(code, columnNameElement);
+                        }
+                    }
+
+                    if (!isMerge)
+                    {
+                        // clear description from any unspecified column
+                        foreach (var column in table.Columns)
+                        {
+                            if (!updatedColumns.ContainsKey(column.Name)
+                                && column.Description.Length > 0)
                             {
-                                var docstring = GetLiteralValueAfterElement(colon);
-                                if (docstring != null)
-                                    return column.WithDescription(docstring);
+                                updatedColumns.Add(column.Name, column.WithDescription(""));
                             }
                         }
+                    }
 
-                        return null;
-                    })
-                    .Where(x => x != null)
-                    .ToList();
-
-                var newTable = table.AddOrUpdateColumns(newColumns!);
-
-                return code.Globals.AddOrUpdateDatabaseMembers(newTable);
-            }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyCreateExternalTable(KustoCode code, CustomCommand commandRoot)
-        {
-            var nn = GetElementWithTag(commandRoot, "ExternalTableName");
-            var name = GetName(nn);
-            if (name != null && code.Globals.Database.GetExternalTable(name) == null)
-            {
-                var schema = GetSchemaAfterElement(code, nn);
-                if (schema != null)
+                    var newTable = table.AddOrUpdateColumns(updatedColumns.Values);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newTable);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
                 {
-                    var docstring = GetPropertyValueText(commandRoot, "docstring");
-                    var newExternalTable = new ExternalTableSymbol(name, schema, docstring);
-                    return code.Globals.AddOrUpdateDatabaseMembers(newExternalTable);
+                    return GetEntityDoesNotExistResult(code, "table", tableName);
                 }
             }
-
-            return code.Globals;
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
         }
 
-        private static GlobalState ApplyAlterExternalTable(KustoCode code, CustomCommand commandRoot)
+        #endregion
+
+        #region External Tables
+
+        private static ApplyCommandResult ApplyCreateExternalTable(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = GetElementWithTag(commandRoot, "ExternalTableName");
-            var name = GetName(nn);
-            if (name != null && code.Globals.Database.GetExternalTable(name) is ExternalTableSymbol et)
+            if (GetElementWithTag(commandRoot, "ExternalTableName") is { } nameElement
+                && GetName(nameElement) is string externalTableName
+                && GetSchemaAfterElement(code, nameElement) is string schema
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
             {
-                var schema = GetSchemaAfterElement(code, nn);
-                if (schema != null)
+                if (code.Globals.Database.GetExternalTable(externalTableName) == null)
                 {
-                    var docstring = GetPropertyValueText(commandRoot, "docstring");
-                    var newExternalTable = new ExternalTableSymbol(name, schema, docstring);
-                    return code.Globals.AddOrUpdateDatabaseMembers(newExternalTable);
+                    var newExternalTable = new ExternalTableSymbol(externalTableName, schema, docstring);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newExternalTable);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityAlreadyExistsResult(code, "external table", externalTableName);
                 }
             }
-
-            return code.Globals;
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
         }
 
-        private static GlobalState ApplyCreateOrAlterExternalTable(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyAlterExternalTable(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = GetElementWithTag(commandRoot, "ExternalTableName");
-            var name = GetName(nn);
-            if (name != null)
+            if (GetElementWithTag(commandRoot, "ExternalTableName") is { } nameElement
+                && GetName(nameElement) is string externalTableName
+                && GetSchemaAfterElement(code, nameElement) is string schema
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
             {
-                var schema = GetSchemaAfterElement(code, nn);
-                if (schema != null)
+                if (code.Globals.Database.GetExternalTable(externalTableName) is ExternalTableSymbol externalTable)
                 {
-                    var docstring = GetPropertyValueText(commandRoot, "docstring");
-                    var newExternalTable = new ExternalTableSymbol(name, schema, docstring);
-                    return code.Globals.AddOrUpdateDatabaseMembers(newExternalTable);
+                    var newExternalTable = new ExternalTableSymbol(externalTableName, schema, docstring);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newExternalTable);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "external table", externalTableName);
                 }
             }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyDropExternalTable(KustoCode code, CustomCommand commandRoot)
-        {
-            var nn = GetElementWithTag(commandRoot, "ExternalTableName");
-            var name = GetName(nn);
-            if (name != null && code.Globals.Database.GetExternalTable(name) is ExternalTableSymbol et)
+            else
             {
-                return code.Globals.RemoveDatabaseMembers(et);
+                return GetMissingSyntaxResult(code);
             }
-
-            return code.Globals;
         }
 
-        private static GlobalState ApplyCreateMaterializedView(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyCreateOrAlterExternalTable(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = GetElementAt(commandRoot, nn =>
-                ((PreviousTokenIs(nn, "materialized-view") && GetName(nn) != "with") 
-                    || (PreviousTokenIs(nn, ")") && NextTokenIs(nn, "on")))
-                 && GetName(nn) != null);
-            var name = GetName(nn);
-
-            if (name != null && code.Globals.Database.GetMaterializedView(name) == null)
+            if (GetElementWithTag(commandRoot, "ExternalTableName") is { } nameElement
+                && GetName(nameElement) is string externalTableName
+                && GetSchemaAfterElement(code, nameElement) is string schema
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring)
             {
-                var docstring = GetPropertyValueText(commandRoot, "docstring");
-                var body = commandRoot.GetFirstDescendant<FunctionBody>();
-                var schema = GetMaterializedViewResult(code);
+                var newExternalTable = new ExternalTableSymbol(externalTableName, schema, docstring);
+                var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newExternalTable);
+                return new ApplyCommandResult(newGlobals);
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
 
-                if (schema is TableSymbol table && body != null)
+        private static ApplyCommandResult ApplyDropExternalTable(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameWithTag(commandRoot, "ExternalTableName") is string externalTableName)
+            {
+                if (code.Globals.Database.GetExternalTable(externalTableName) is ExternalTableSymbol externalTable)
                 {
-                    var newView = new MaterializedViewSymbol(name, table.Columns, body.ToString(), docstring);
-                    return code.Globals.AddOrUpdateDatabaseMembers(newView);
+                    var newGlobals = code.Globals.RemoveDatabaseMembers(externalTable);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "external table", externalTableName);
                 }
             }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyAlterMaterializedView(KustoCode code, CustomCommand commandRoot)
-        {
-            var nn = GetElementAt(commandRoot, nn => (PreviousTokenIs(nn, "materialized-view") || PreviousTokenIs(nn, ")")) && NextTokenIs(nn, "on"));
-            var name = GetName(nn);
-
-            if (name != null && code.Globals.Database.GetMaterializedView(name) != null)
+            else
             {
-                var docstring = GetPropertyValueText(commandRoot, "docstring");
-                var body = commandRoot.GetFirstDescendant<FunctionBody>();
-                var schema = GetMaterializedViewResult(code);
+                return GetMissingSyntaxResult(code);
+            }
+        }
+        #endregion
 
-                if (schema is TableSymbol table && body != null)
+        #region Materialized Views
+
+        private static ApplyCommandResult ApplyCreateMaterializedView(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameWithTag(commandRoot, "MaterializedViewName") is string name
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring
+                && commandRoot.GetFirstDescendant<FunctionBody>() is { } body)
+            {
+                if (!TryGetMaterializedViewSource(code, out var schema, out var diagnostics))
+                    return new ApplyCommandResult(code.Globals, code.Text, new[] { Diagnostics.GetMaterializedViewSourceInvalid() }.Concat(diagnostics));
+
+                if (code.Globals.Database.GetMaterializedView(name) == null)
                 {
-                    var newView = new MaterializedViewSymbol(name, table.Columns, body.ToString(), docstring);
-                    return code.Globals.AddOrUpdateDatabaseMembers(newView);
+                    var newView = new MaterializedViewSymbol(name, schema.Columns, body.ToString(), docstring);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newView);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else if (HasIfNotExists(commandRoot))
+                {
+                    return new ApplyCommandResult(code.Globals);
+                }
+                else
+                {
+                    return GetEntityAlreadyExistsResult(code, "materialized view", name);
                 }
             }
-
-            return code.Globals;
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
         }
 
-        private static GlobalState ApplyCreateOrAlterMaterializedView(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyAlterMaterializedView(KustoCode code, CustomCommand commandRoot)
         {
-            var nn = GetElementAt(commandRoot, nn => (PreviousTokenIs(nn, "materialized-view") || PreviousTokenIs(nn, ")")) && NextTokenIs(nn, "on"));
-            var name = GetName(nn);
-
-            if (name != null)
+            if (GetNameWithTag(commandRoot, "MaterializedViewName") is string name
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring
+                && commandRoot.GetFirstDescendant<FunctionBody>() is { } body)
             {
-                var docstring = GetPropertyValueText(commandRoot, "docstring");
-                var body = commandRoot.GetFirstDescendant<FunctionBody>();
-                var schema = GetMaterializedViewResult(code);
+                if (!TryGetMaterializedViewSource(code, out var schema, out var diagnostics))
+                    return new ApplyCommandResult(code.Globals, code.Text, new[] { Diagnostics.GetMaterializedViewSourceInvalid() }.Concat(diagnostics));
 
-                if (schema is TableSymbol table && body != null)
+                if (code.Globals.Database.GetMaterializedView(name) is { } mview)
                 {
-                    var newView = new MaterializedViewSymbol(name, table.Columns, body.ToString(), docstring);
-                    return code.Globals.AddOrUpdateDatabaseMembers(newView);
+                    var newView = new MaterializedViewSymbol(name, schema.Columns, body.ToString(), docstring);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newView);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "materialized view", name);
                 }
             }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyAlterMaterializedViewDocString(KustoCode code, CustomCommand commandRoot)
-        {
-            var name = GetNameAfterToken(commandRoot, "materialized-view");
-            var docstring = GetLiteralValueAfterToken(commandRoot, "docstring");
-            if (name != null && docstring != null
-                && code.Globals.Database.GetMaterializedView(name) is MaterializedViewSymbol existingView)
+            else
             {
-                var newView = existingView.WithDescripton(docstring);
-                return code.Globals.AddOrUpdateDatabaseMembers(newView);
+                return GetMissingSyntaxResult(code);
             }
-
-            return code.Globals;
         }
 
-        private static GlobalState ApplyDropMaterializedView(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyCreateOrAlterMaterializedView(KustoCode code, CustomCommand commandRoot)
         {
-            var name = GetNameAfterToken(commandRoot, "materialized-view");
-           
-            if (name != null && code.Globals.Database.GetMaterializedView(name) is MaterializedViewSymbol existingView)
+            if (GetNameWithTag(commandRoot, "MaterializedViewName") is string name
+                && GetPropertyValueText(commandRoot, "docstring") is var docstring
+                && commandRoot.GetFirstDescendant<FunctionBody>() is { } body)
             {
-                return code.Globals.RemoveDatabaseMembers(existingView);
+                if (!TryGetMaterializedViewSource(code, out var schema, out var diagnostics))
+                    return new ApplyCommandResult(code.Globals, code.Text, new[] { Diagnostics.GetMaterializedViewSourceInvalid() }.Concat(diagnostics));
+
+                var newView = new MaterializedViewSymbol(name, schema.Columns, body.ToString(), docstring);
+                var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newView);
+                return new ApplyCommandResult(newGlobals);
             }
-
-            return code.Globals;
-        }
-
-        private static GlobalState ApplyRenameMaterializedView(KustoCode code, CustomCommand commandRoot)
-        {
-            var name = GetNameAfterToken(commandRoot, "materialized-view");
-            var newName = GetNameAfterToken(commandRoot, "to");
-            if (name != null && newName != null
-                && code.Globals.Database.GetMaterializedView(name) is MaterializedViewSymbol existingView)
+            else
             {
-                var newView = existingView.WithName(newName);
-                return code.Globals.ReplaceDatabaseMembers((existingView, newView));
+                return GetMissingSyntaxResult(code);
             }
-
-            return code.Globals;
         }
 
-        private static GlobalState ApplyExecuteDatabaseScript(KustoCode code, CustomCommand commandRoot)
+        private static ApplyCommandResult ApplyAlterMaterializedViewDocString(KustoCode code, CustomCommand commandRoot)
         {
-            var otherCommands = commandRoot.GetDescendants<CustomCommand>().Select(cc => cc.ToString());
+            if (GetNameWithTag(commandRoot, "MaterializedViewName") is string name
+                && GetNameWithTag(commandRoot, "Documentation") is string docstring)
+            {
+                if (code.Globals.Database.GetMaterializedView(name) is { } existingView)
+                {
+                    var newView = existingView.WithDescripton(docstring);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newView);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "materialized view", name);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyDropMaterializedView(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementAfterToken(commandRoot, "materialized-view") is { } nameElement
+                && GetName(nameElement) is string name)
+            {
+                if (code.Globals.Database.GetMaterializedView(name) is MaterializedViewSymbol existingView)
+                {
+                    var newGlobals = code.Globals.RemoveDatabaseMembers(existingView);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "materialized view", name);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyRenameMaterializedView(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameWithTag(commandRoot, "MaterializedViewName") is string name
+                && GetNameWithTag(commandRoot, "NewMaterializedViewName") is string newName)
+            {
+                if (code.Globals.Database.GetMaterializedView(name) is MaterializedViewSymbol existingView)
+                {
+                    if (code.Globals.Database.GetMaterializedView(newName) == null)
+                    {
+                        var newView = existingView.WithName(newName);
+                        var newGlobals = code.Globals.ReplaceDatabaseMembers((existingView, newView));
+                        return new ApplyCommandResult(newGlobals);
+                    }
+                    else
+                    {
+                        return GetEntityAlreadyExistsResult(code, "materialized view", newName);
+                    }
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "materialized view", name);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        #endregion
+
+        #region Execute Script
+
+        private static ApplyCommandResult ApplyExecuteDatabaseScript(KustoCode code, CustomCommand commandRoot)
+        {
+            var otherCommands = commandRoot.GetDescendants<Command>().Select(cc => cc.ToString());
             var globals = code.Globals;
 
+            ApplyCommandResult? result = null;
             foreach (var otherCommand in otherCommands)
             {
-                globals = globals.ApplyCommand(otherCommand);
+                result = globals.ApplyCommand(otherCommand);
+                if (!result.Succeeded)
+                    return result;
+                globals = result.Globals;
             }
 
-            return globals;
+            return result!;
         }
+
+        #endregion
+
+        #region Helpers
 
         private static IReadOnlyList<ColumnSymbol> MergeColumns(IReadOnlyList<ColumnSymbol> existingColumns, IReadOnlyList<ColumnSymbol> newColumns)
         {
@@ -919,6 +1317,26 @@ namespace Kusto.Toolkit
             out TableSymbol? table,
             out ColumnSymbol? column)
         {
+            if (TryGetDatabaseTableAndColumnNames(expr, out var databaseName, out var tableName, out var columnName))
+            {
+                database = databaseName != null ? globals.Cluster.GetDatabase(databaseName) : globals.Database;
+                table = database?.GetTable(tableName);
+                column = table?.GetColumn(columnName);
+                return database != null && table != null && column != null;
+            }
+
+            database = null;
+            table = null;
+            column = null;
+            return false;
+        }
+
+        private static bool TryGetDatabaseTableAndColumnNames(
+            SyntaxElement expr,
+            out string? database,
+            out string? table,
+            out string? column)
+        {
             if (expr is PathExpression pe)
             {
                 if (pe.Expression is PathExpression dbPath
@@ -926,23 +1344,23 @@ namespace Kusto.Toolkit
                     && dbPath.Selector is NameReference dbTableRef
                     && pe.Selector is NameReference dbTableColumnRef)
                 {
-                    database = globals.Cluster.GetDatabase(dbRef.SimpleName);
-                    table = database?.GetTable(dbTableRef.SimpleName);
-                    column = table?.GetColumn(dbTableColumnRef.SimpleName);
-                    return database != null && table != null && column != null;
+                    database = dbRef.SimpleName;
+                    table = dbTableRef.SimpleName;
+                    column = dbTableColumnRef.SimpleName;
+                    return true;
                 }
                 else if (pe.Expression is NameReference tableRef
                     && pe.Selector is NameReference columnRef)
                 {
-                    database = globals.Database;
-                    table = database.GetTable(tableRef.SimpleName);
-                    column = table?.GetColumn(columnRef.SimpleName);
-                    return database != null && table != null && column != null;
+                    database = null;
+                    table = tableRef.SimpleName;
+                    column = columnRef.SimpleName;
+                    return true;
                 }
             }
             else if (expr is CustomNode && expr.ChildCount == 1)
             {
-                return TryGetDatabaseTableAndColumn(globals, expr.GetChild(0), out database, out table, out column);
+                return TryGetDatabaseTableAndColumnNames(expr.GetChild(0), out database, out table, out column);
             }
 
             database = null;
@@ -1200,21 +1618,31 @@ namespace Kusto.Toolkit
             return null;
         }
 
-        private static Symbol? GetMaterializedViewResult(KustoCode code)
+        private static bool TryGetMaterializedViewSource(KustoCode code, out TableSymbol schema, out IReadOnlyList<Diagnostic> diagnostics)
         {
-            var analyzedCode = code.HasSemantics
-                ? code
-                : code.Analyze();
+            schema = null!;
+            diagnostics = Array.Empty<Diagnostic>();
+
+            var analyzedCode = code.Analyze();
 
             var commandRoot = analyzedCode.Syntax.GetFirstDescendant<CustomCommand>();
             if (commandRoot == null)
-                return null;
+                return false;
 
             var body = commandRoot.GetFirstDescendant<FunctionBody>();
             if (body == null)
-                return null;
+                return false;
 
-            return body.Expression?.ResultType;
+            // any errors in body explicitly?
+            var errors = GetErrors(body.GetContainedDiagnostics());
+            if (errors.Count > 0)
+            {
+                diagnostics = errors;
+                return false;
+            }
+
+            schema = (body.Expression?.ResultType as TableSymbol)!;
+            return schema != null;
         }
 
         private static bool PreviousTokenIs(SyntaxElement element, string tokenText)
@@ -1253,7 +1681,48 @@ namespace Kusto.Toolkit
                 }
             }
 
-            return null;
+            return null;       
+        }
+        #endregion
+    }
+
+    public sealed class ApplyCommandResult
+    {
+        /// <summary>
+        /// The updated globals.
+        /// </summary>
+        public GlobalState Globals { get; }
+
+        /// <summary>
+        /// The command that caused the errors.
+        /// </summary>
+        public string Command { get; }
+
+        /// <summary>
+        /// The errors, if any.
+        /// </summary>
+        public IReadOnlyList<Diagnostic> Errors { get; }
+
+        /// <summary>
+        /// True if the command was applied successfully.
+        /// </summary>
+        public bool Succeeded => this.Errors.Count == 0;
+
+        public ApplyCommandResult(GlobalState globals, string? commandWithError, IEnumerable<Diagnostic>? errors)
+        {
+            this.Globals = globals;
+            this.Command = commandWithError ?? "";
+            this.Errors = errors != null ? errors.ToReadOnly() : Array.Empty<Diagnostic>();
+        }
+
+        public ApplyCommandResult(GlobalState globals, string commandWithError, Diagnostic error)
+            : this(globals, commandWithError, new[] { error })
+        {
+        }
+
+        public ApplyCommandResult(GlobalState globals)
+            : this(globals, null, (IEnumerable<Diagnostic>?)null)
+        {
         }
     }
 }
