@@ -76,14 +76,9 @@ namespace Kusto.Toolkit
 
         private static ApplyCommandResult ApplyCommandInternal(GlobalState globals, string command, ApplyKind kind)
         {
-            // cannot add members to unknown cluster or database
-            if (globals.Cluster == ClusterSymbol.Unknown
-                || globals.Database == DatabaseSymbol.Unknown)
-                return new ApplyCommandResult(globals, command, Diagnostics.GetNoCurrentDatabase());
-
             // if is not a command
             if (KustoCode.GetKind(command) != CodeKinds.Command)
-                return new ApplyCommandResult(globals, command, Diagnostics.GetCommandTextIsNotCommandDiagnostic());
+                return new ApplyCommandResult(globals, command, Diagnostics.GetCommandTextIsNotCommand());
  
             // don't analyze to avoid failures on commands that incorrectly use name-references for declarations
             var code = KustoCode.Parse(command, globals);
@@ -234,7 +229,7 @@ namespace Kusto.Toolkit
 
         private static ApplyCommandResult GetMissingSyntaxResult(KustoCode code, SyntaxElement? location = null)
         {
-            var dx = Diagnostics.GetCommandHasMissingSyntax();
+            var dx = Diagnostics.GetCommandHasMissingElements();
             if (location != null)
                 dx = dx.WithLocation(location);
             return new ApplyCommandResult(code.Globals, code.Text, dx);

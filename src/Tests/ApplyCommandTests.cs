@@ -274,12 +274,6 @@ namespace Tests
                 ".create table T (x: long, y: string)"
                 );
 
-            // create table without database fails
-            TestApplyFails(
-                GlobalState.Default,
-                ".create table Customers (Id: long, Name: string)"
-                );
-
             // create table with docstring property sets description too
             TestApply(
                 _globals,
@@ -1562,15 +1556,6 @@ namespace Tests
                     Assert.IsNotNull(t);
                     Assert.AreEqual("(x: long, y: string)", t.ToTestString());
                 });
-        }
-
-        [TestMethod]
-        public void TestUnknownDatabase_Fails()
-        {
-            TestApplyFails(
-                GlobalState.Default,
-                ".create table 'T' (x: long, y: string)"
-                );
         }
 
         [TestMethod]

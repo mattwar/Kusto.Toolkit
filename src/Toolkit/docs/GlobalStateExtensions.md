@@ -26,26 +26,43 @@ Add or update multiple databases within the default cluster.
 <br/>
 
 ### GlobalState.ApplyCommand(string command)
-You may want to evaluate a query or command in the context of another command having already been executed,
-such a table or function being created or altered, but without actually executing the command.
+You may want to evaluate a query or command in the context of another command having already been executed, such as a table or function being created or altered, but without actually executing the command on the server and refetching the changed schema.
 
-Instead of having to manually construct the appropiate symbols corresponding to each change 
-you can now just apply the command text directly to the global state and get a new instance
-with the related schema modified for you.
+Instead of having to manually construct the appropriate symbols corresponding to each change you can now just apply the command text directly to the global state and get a new instance with the related schema symbols changed.
 
 ```csharp
-var globals = GlobalState.Default.ApplyCommand(".create table Customers (Id: long, Name: string)");
-var code = KustoCode.ParseAndAnalyze("Customers | where Name == 'Matt'");
+var globals = ...;
+var result = globals.ApplyCommand(".create table Customers (Id: long, Name: string)");
+if (result.Succeeded)
+{
+    var code = KustoCode.ParseAndAnalyze("Customers | where Name == 'Matt'", globals: result.Globals);
+}
+else 
+{
+    ReportErrors(result.Errors);
+}
 ```
 
 ### GlobalState.ApplyCommands(params string[] commands)
 
-To apply more than one command a time, in order, use `GlobalState.ApplyCommands`.
+To apply more than one command at a time, in order, use `GlobalState.ApplyCommands`. The changes caused by each command will be visible in each subsequent command.
 
 ```csharp
-var globals = _globals.ApplyCommands(
+var result = _globals.ApplyCommands(
     ".create table T (x: long, y: string)",
-    ".set T2 <| T | extend z=1.0");
+    ".create function F() { T };"
+    );
+var globals = result.Globals;
 ```
 
-*note: it is also possible to apply more than one command at a time by applying a single execute script command.*
+Or use a single execute script command.
+```csharp
+var result = _globals.ApplyCommands(
+    """
+    .execute script <| 
+      .create table T(x: long, y: string);
+      .create function F() { T };      
+    """
+    );
+var globals = result.Globals;
+```

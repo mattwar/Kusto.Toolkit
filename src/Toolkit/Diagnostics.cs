@@ -6,12 +6,12 @@ namespace Kusto.Toolkit
     {
         public static Diagnostic GetNoCurrentDatabase()
         {
-            return new Diagnostic("KT001", "Cannot apply command. No current database or cluster defined.");
+            return new Diagnostic("KT001", "No current database or cluster defined.");
         }
 
-        public static Diagnostic GetCommandTextIsNotCommandDiagnostic()
+        public static Diagnostic GetCommandTextIsNotCommand()
         {
-            return new Diagnostic("KT002", "The command text does not refer to a command.");
+            return new Diagnostic("KT002", "The text does not refer to a command.");
         }
 
         public static Diagnostic GetCommandHasErrors()
@@ -24,9 +24,9 @@ namespace Kusto.Toolkit
             return new Diagnostic("KT004", "The command is incomplete or not recognized.");
         }
 
-        public static Diagnostic GetCommandHasMissingSyntax()
+        public static Diagnostic GetCommandHasMissingElements()
         {
-            return new Diagnostic("KT005", "The command has missing syntax needed to apply.");
+            return new Diagnostic("KT005", "The command has missing elements.");
         }
 
         public static Diagnostic GetEntityAlreadyExists(string kind, string name)
