@@ -1471,8 +1471,197 @@ namespace Tests
 
         #endregion
 
+        #region Graphs
+
+        [TestMethod]
+        public void TestCreateOrAlterGraphModel()
+        {
+            var model =
+                """
+                { "Definition": { "Steps": [{ "Kind": "AddEdges", "Query": "E" }, { "Kind": "AddNodes", "Query": "N" }] } }
+                """;
+
+            var encodedModel = KustoFacts.GetSingleQuotedStringLiteral(model);
+
+            // create new graph_model
+            TestApply(
+                _globals.AddOrUpdateDatabaseMembers(
+                    new TableSymbol("E", "(x: long, y: string)"),
+                    new TableSymbol("N", "(a: long, b: long)")),
+                $".create-or-alter graph_model G {encodedModel}",
+                globals =>
+                {
+                    var g = globals.Database.GetGraphModel("G");
+                    Assert.IsNotNull(g);
+                    Assert.AreEqual(1, g.Edges.Count);
+                    Assert.AreEqual("E", g.Edges[0].Body);
+                    Assert.AreEqual(1, g.Nodes.Count);
+                    Assert.AreEqual("N", g.Nodes[0].Body);
+                });
+
+            // alter existing graph_model
+            TestApply(
+                _globals.AddOrUpdateDatabaseMembers(
+                    new TableSymbol("E", "(x: long, y: string)"),
+                    new TableSymbol("N", "(a: long, b: long)"),
+                    new TableSymbol("N2", "(a: long, c: long"),
+                    new GraphModelSymbol("G", "E", "N2")),
+                $".create-or-alter graph_model G {encodedModel}",
+                globals =>
+                {
+                    var g = globals.Database.GetGraphModel("G");
+                    Assert.IsNotNull(g);
+                    Assert.AreEqual(1, g.Edges.Count);
+                    Assert.AreEqual("E", g.Edges[0].Body);
+                    Assert.AreEqual(1, g.Nodes.Count);
+                    Assert.AreEqual("N", g.Nodes[0].Body);
+                });
+
+            // create new graph_model with bad definition fails
+            TestApplyFails(
+                _globals,
+                ".create-or-alter graph_model G ''"
+                );
+        }
+
+        [TestMethod]
+        public void TestDropGraphModel()
+        {
+            // drop existing graph_model
+            TestApply(
+                _globals.AddOrUpdateDatabaseMembers(
+                    new TableSymbol("E", "(x: long, y: string)"),
+                    new TableSymbol("N", "(a: long, b: long)"),
+                    new GraphModelSymbol("G", "E", "N")),
+                $".drop graph_model G",
+                globals =>
+                {
+                    var g = globals.Database.GetGraphModel("G");
+                    Assert.IsNull(g);
+                });
+
+            // drop non-existing graph_model fails
+            TestApplyFails(
+                _globals,
+                $".drop graph_model G"
+                );
+        }
+
+        [TestMethod]
+        public void TestMakeGraphSnapshot()
+        {
+            // make graph_snapshot
+            TestApply(
+                _globals.AddOrUpdateDatabaseMembers(
+                    new TableSymbol("E", "(x: long, y: string)"),
+                    new TableSymbol("N", "(a: long, b: long)"),
+                    new GraphModelSymbol("G", "E", "N")),
+                $".make graph_snapshot S from G",
+                globals =>
+                {
+                    var g = globals.Database.GetGraphModel("G");
+                    Assert.AreEqual(1, g.Snapshots.Count);
+                    Assert.AreEqual("S", g.Snapshots[0].Name);
+                });
+
+            // make existing graph_snapshot fails
+            TestApplyFails(
+                _globals.AddOrUpdateDatabaseMembers(
+                    new TableSymbol("E", "(x: long, y: string)"),
+                    new TableSymbol("N", "(a: long, b: long)"),
+                    new GraphModelSymbol("G", "E", "N", ["S"])),
+                $".make graph_snapshot S from G"
+                );
+
+            // make new graph_snapshot for non-existing graph_model
+            TestApplyFails(
+                _globals,
+                $".make graph_snapshot S from G"
+                );
+        }
+
+        [TestMethod]
+        public void TestDropGraphSnapshot()
+        {
+            // drop existing graph_snapshot
+            TestApply(
+                _globals.AddOrUpdateDatabaseMembers(
+                    new TableSymbol("E", "(x: long, y: string)"),
+                    new TableSymbol("N", "(a: long, b: long)"),
+                    new GraphModelSymbol("G", "E", "N", ["S"])),
+                $".drop graph_snapshot G.S",
+                globals =>
+                {
+                    var g = globals.Database.GetGraphModel("G");
+                    Assert.IsNotNull(g);
+                    Assert.AreEqual(0, g.Snapshots.Count);
+                });
+
+            // drop non-existing graph_snapshot also okay
+            TestApply(
+                _globals.AddOrUpdateDatabaseMembers(
+                    new TableSymbol("E", "(x: long, y: string)"),
+                    new TableSymbol("N", "(a: long, b: long)"),
+                    new GraphModelSymbol("G", "E", "N")),
+                $".drop graph_snapshot G.S",
+                globals =>
+                {
+                    var g = globals.Database.GetGraphModel("G");
+                    Assert.IsNotNull(g);
+                    Assert.AreEqual(0, g.Snapshots.Count);
+                });
+
+            // drop graph_snapshot for non-existing graph_model fails
+            TestApplyFails(
+                _globals,
+                $".drop graph_snapshot G.S"
+                );
+        }
+
+        [TestMethod]
+        public void TestDropGraphSnapshots()
+        {
+            // drop existing graph_snapshots
+            TestApply(
+                _globals.AddOrUpdateDatabaseMembers(
+                    new TableSymbol("E", "(x: long, y: string)"),
+                    new TableSymbol("N", "(a: long, b: long)"),
+                    new GraphModelSymbol("G", "E", "N", ["S1", "S2", "X"])),
+                $".drop graph_snapshots G.S*",
+                globals =>
+                {
+                    var g = globals.Database.GetGraphModel("G");
+                    Assert.IsNotNull(g);
+                    Assert.AreEqual(1, g.Snapshots.Count);
+                    Assert.AreEqual("X", g.Snapshots[0].Name);
+                });
+
+            // drop non-matching graph_snapshots
+            TestApply(
+                _globals.AddOrUpdateDatabaseMembers(
+                    new TableSymbol("E", "(x: long, y: string)"),
+                    new TableSymbol("N", "(a: long, b: long)"),
+                    new GraphModelSymbol("G", "E", "N", ["X"])),
+                $".drop graph_snapshots G.S*",
+                globals =>
+                {
+                    var g = globals.Database.GetGraphModel("G");
+                    Assert.IsNotNull(g);
+                    Assert.AreEqual(1, g.Snapshots.Count);
+                    Assert.AreEqual("X", g.Snapshots[0].Name);
+                });
+
+            // drop graph_snapshots for non-existing graph_model fails
+            TestApplyFails(
+                _globals,
+                $".drop graph_snapshots G.S*"
+                );
+        }
+
+        #endregion
+
         #region Script
-        
+
         [TestMethod]
         public void TestExecuteDatabaseScript()
         {

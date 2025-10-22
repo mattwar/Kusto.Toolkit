@@ -832,5 +832,112 @@
       "Body": "{graph('Simple')}",
       "Description": "Function to return a simple graph to provide an example for documentation purposes."
     }
+  ],
+  "GraphModels": [
+    {
+      "Name": "Simple",
+      "Edges": [
+        "SimpleGraph_Edges"
+      ],
+      "Nodes": [
+        "SimpleGraph_Nodes"
+      ],
+      "Snapshots": [
+        "Latest"
+      ]
+    },
+    {
+      "Name": "LDBC_SNB_Interactive",
+      "Edges": [
+        "LDBC_SNB_Comment_hasCreator_Person",
+        "LDBC_SNB_Comment_hasTag_Tag",
+        "LDBC_SNB_Comment_isLocatedIn_Place",
+        "LDBC_SNB_Comment_replyOf_Comment",
+        "LDBC_SNB_Comment_replyOf_Post",
+        "LDBC_SNB_Forum_containerOf_Post",
+        "LDBC_SNB_Forum_hasMember_Person",
+        "LDBC_SNB_Forum_hasModerator_Person",
+        "LDBC_SNB_Forum_hasTag_Tag",
+        "LDBC_SNB_Organisation_isLocatedIn_Place",
+        "LDBC_SNB_Person_hasInterest_Tag",
+        "LDBC_SNB_Person_isLocatedIn_Place",
+        "LDBC_SNB_Person_knows_Person",
+        "LDBC_SNB_Person_likes_Comment",
+        "LDBC_SNB_Person_likes_Post",
+        "LDBC_SNB_Person_studyAt_Organization",
+        "LDBC_SNB_Person_workAt_Organization",
+        "LDBC_SNB_Place_isPartOf_Place",
+        "LDBC_SNB_Post_hasCreator_Person",
+        "LDBC_SNB_Post_hasTag_Tag",
+        "LDBC_SNB_Post_isLocatedIn_Place",
+        "LDBC_SNB_Tag_hasType_TagClass",
+        "LDBC_SNB_TagClass_isSubclassOf_TagClass"
+      ],
+      "Nodes": [
+        "LDBC_SNB_Comment",
+        "LDBC_SNB_Forum",
+        "LDBC_SNB_Organisation",
+        "LDBC_SNB_Person",
+        "LDBC_SNB_Place",
+        "LDBC_SNB_Post",
+        "LDBC_SNB_Tag",
+        "LDBC_SNB_TagClass"
+      ],
+      "Snapshots": [
+        "Latest"
+      ]
+    },
+    {
+      "Name": "LDBC_Financial",
+      "Edges": [
+        "LDBC_FIN_MediumSignInAccount",
+        "LDBC_FIN_AccountRepayLoan",
+        "LDBC_FIN_AccountTransferAccount",
+        "LDBC_FIN_AccountWithdrawAccount",
+        "LDBC_FIN_CompanyApplyLoan",
+        "LDBC_FIN_CompanyGuaranteeCompany",
+        "LDBC_FIN_CompanyInvestCompany",
+        "LDBC_FIN_CompanyOwnAccount",
+        "LDBC_FIN_LoanDepositAccount",
+        "LDBC_FIN_PersonApplyLoan",
+        "LDBC_FIN_PersonGuaranteePerson",
+        "LDBC_FIN_PersonInvestCompany",
+        "LDBC_FIN_PersonOwnAccount"
+      ],
+      "Nodes": [
+        "LDBC_FIN_Company",
+        "LDBC_FIN_Person",
+        "LDBC_FIN_Account",
+        "LDBC_FIN_Loan",
+        "LDBC_FIN_Medium"
+      ],
+      "Snapshots": [
+        "Latest"
+      ]
+    },
+    {
+      "Name": "BloodHound_Entra",
+      "Edges": [
+        "BloodHound_Entra_Edges"
+      ],
+      "Nodes": [
+        "BloodHound_Entra_Nodes"
+      ],
+      "Snapshots": [
+        "Latest"
+      ]
+    },
+    {
+      "Name": "BloodHound_AD",
+      "Edges": [
+        "BloodHound_AD_Edges"
+      ],
+      "Nodes": [
+        "BloodHound_AD_Nodes"
+      ],
+      "Snapshots": [
+        "Latest"
+      ]
+    }
   ]
 }

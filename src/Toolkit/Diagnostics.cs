@@ -53,5 +53,10 @@ namespace Kusto.Toolkit
         {
             return new Diagnostic("KT010", $"The command '{commandKind}' cannot be applied.");
         }
+        
+        public static Diagnostic GetInvalidGraphModel()
+        {
+            return new Diagnostic("KT011", $"Invalid graph model definition.");
+        }
     }
 }

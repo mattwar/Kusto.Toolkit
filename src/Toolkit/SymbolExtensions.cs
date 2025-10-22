@@ -226,5 +226,62 @@ namespace Kusto.Toolkit
         {
             return table.ReplaceColumns((IEnumerable<(ColumnSymbol original, ColumnSymbol replacement)>)replacements);
         }
+
+        /// <summary>
+        /// Create a new <see cref="GraphModelSymbol"/> with the snapshots changes.
+        /// </summary>
+        public static GraphModelSymbol WithSnapshots(this GraphModelSymbol graphModel, IEnumerable<string> snapshots)
+        {
+            return new GraphModelSymbol(
+                graphModel.Name, 
+                graphModel.GetEdgeQueries(),
+                graphModel.GetNodeQueries(),
+                snapshots
+                );
+        }
+
+        /// <summary>
+        /// Create a new <see cref="GraphModelSymbol"/> with the edges changed.
+        /// </summary>
+        public static GraphModelSymbol WithEdges(this GraphModelSymbol graphModel, IEnumerable<string> edges)
+        {
+            return new GraphModelSymbol(
+                graphModel.Name, 
+                edges, 
+                graphModel.GetNodeQueries(),
+                graphModel.GetSnapshotNames()
+                );
+        }
+
+        /// <summary>
+        /// Create a new <see cref="GraphModelSymbol"/> with the nodes changed.
+        /// </summary>
+        public static GraphModelSymbol WithNodes(this GraphModelSymbol graphModel, IEnumerable<string> nodes)
+        {
+            return new GraphModelSymbol(
+                graphModel.Name,
+                graphModel.GetEdgeQueries(),
+                nodes,
+                graphModel.GetSnapshotNames()
+                );
+        }
+
+        /// <summary>
+        /// Gets the edge query texts.
+        /// </summary>
+        public static IReadOnlyList<string> GetEdgeQueries(this GraphModelSymbol graphModel) =>
+            graphModel.Edges.Select(e => e.Body).ToList();
+
+        /// <summary>
+        /// Gets the node query texts.
+        /// </summary>
+        public static IReadOnlyList<string> GetNodeQueries(this GraphModelSymbol graphModel) =>
+            graphModel.Nodes.Select(n => n.Body).ToList();
+
+        /// <summary>
+        /// Gets the snapshot names.
+        /// </summary>
+        public static IReadOnlyList<string> GetSnapshotNames(this GraphModelSymbol graphModel) =>
+            graphModel.Snapshots.Select(sn => sn.Name).ToList();
     }
 }

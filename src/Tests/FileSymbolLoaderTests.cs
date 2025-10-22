@@ -64,19 +64,7 @@ namespace Tests
         }
 
         [TestMethod]
-        public async Task TestLoadDatabaseAsync_default_cluster()
-        {
-            await TestSaveDatabaseAsync_default_cluster();
-        }
-
-        [TestMethod]
-        public async Task TestLoadDatabaseAsync_explicit_cluster()
-        {
-            await TestSaveDatabaseAsync_explicit_cluster();
-        }
-
-        [TestMethod]
-        public async Task TestSaveDatabaseAsync_default_cluster()
+        public async Task TestSaveLoadDatabaseAsync_default_cluster()
         {
             var cachePath = GetTestCachePath();
             var loader = new FileSymbolLoader(cachePath, "default_cluster");
@@ -98,7 +86,7 @@ namespace Tests
         }
 
         [TestMethod]
-        public async Task TestSaveDatabaseAsync_explicit_cluster()
+        public async Task TestSaveLoadDatabaseAsync_explicit_cluster()
         {
             var cachePath = GetTestCachePath();
             var loader = new FileSymbolLoader(cachePath, "default_cluster");

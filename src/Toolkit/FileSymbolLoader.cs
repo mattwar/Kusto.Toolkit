@@ -445,6 +445,8 @@ namespace Kusto.Toolkit
                 members.AddRange(db.Functions.Select(f => CreateFunctionSymbol(f)));
             if (db.EntityGroups != null)
                 members.AddRange(db.EntityGroups.Select(eg => CreateEntityGroupSymbol(eg)));
+            if (db.GraphModels != null)
+                members.AddRange(db.GraphModels.Select(gm => CreateGraphModelSymbol(gm)));
 
             return new DatabaseSymbol(db.Name, db.PrettyName, members);
         }
@@ -474,6 +476,11 @@ namespace Kusto.Toolkit
             return new EntityGroupSymbol(eg.Name, eg.Definition);
         }
 
+        public static GraphModelSymbol CreateGraphModelSymbol(GraphModelInfo gm)
+        {
+            return new GraphModelSymbol(gm.Name, gm.Edges, gm.Nodes, gm.Snapshots);
+        }
+
         private static DatabaseInfo CreateDatabaseInfo(DatabaseSymbol db)
         {
             return new DatabaseInfo
@@ -484,7 +491,8 @@ namespace Kusto.Toolkit
                 ExternalTables = db.ExternalTables.Count > 0 ? db.ExternalTables.Select(e => CreateExternalTableInfo(e)).ToList() : null,
                 MaterializedViews = db.MaterializedViews.Count > 0 ? db.MaterializedViews.Select(m => CreateMaterializedViewInfo(m)).ToList() : null,
                 Functions = db.Functions.Count > 0 ? db.Functions.Select(f => CreateFunctionInfo(f)).ToList() : null,
-                EntityGroups = db.EntityGroups.Count > 0 ? db.EntityGroups.Select(eg => CreateEntityGroupInfo(eg)).ToList() : null
+                EntityGroups = db.EntityGroups.Count > 0 ? db.EntityGroups.Select(eg => CreateEntityGroupInfo(eg)).ToList() : null,
+                GraphModels = db.GraphModels.Count > 0 ? db.GraphModels.Select(gm => CreateGraphModelInfo(gm)).ToList() : null
             };
         }
 
@@ -539,6 +547,17 @@ namespace Kusto.Toolkit
             };
         }
 
+        private static GraphModelInfo CreateGraphModelInfo(GraphModelSymbol symbol)
+        {
+            return new GraphModelInfo
+            {
+                Name = symbol.Name,
+                Edges = symbol.Edges.Select(s => s.Body).ToArray(),
+                Nodes = symbol.Nodes.Select(s => s.Body).ToArray(),
+                Snapshots = symbol.Snapshots.Select(s => s.Name).ToArray()
+            };
+        }
+
         public class DatabaseNameInfo
         {
             public string Name;
@@ -554,6 +573,7 @@ namespace Kusto.Toolkit
             public List<MaterializedViewInfo> MaterializedViews;
             public List<FunctionInfo> Functions;
             public List<EntityGroupInfo> EntityGroups;
+            public List<GraphModelInfo> GraphModels;
         }
 
         public class TableInfo
@@ -590,6 +610,14 @@ namespace Kusto.Toolkit
         {
             public string Name;
             public string Definition;
+        }
+
+        public class GraphModelInfo
+        {
+            public string Name;
+            public string[] Edges;
+            public string[] Nodes;
+            public string[] Snapshots;
         }
     }
 }

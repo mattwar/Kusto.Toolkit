@@ -124,6 +124,12 @@ namespace Tests
             {
                 AssertEqual(expected.Functions[i], actual.Functions[i]);
             }
+
+            Assert.AreEqual(expected.GraphModels.Count, actual.GraphModels.Count, "graph models count");
+            for (int i = 0; i < expected.GraphModels.Count; i++)
+            {
+                AssertEqual(expected.GraphModels[i], actual.GraphModels[i]);
+            }
         }
 
         protected static void AssertEqual(TableSymbol expected, TableSymbol actual)
@@ -178,6 +184,23 @@ namespace Tests
             var actualBody = actual.Signatures[0].Body;
 
             Assert.AreEqual(expectedBody, actualBody, $"function '{expected.Name}' body");
+        }
+
+        protected static void AssertEqual(GraphModelSymbol expected, GraphModelSymbol actual)
+        {
+            Assert.AreEqual(expected.Name, actual.Name, "graph model name");
+            
+            Assert.AreEqual(expected.Edges.Count, actual.Edges.Count, "graph model edge steps");
+            for (int i = 0; i < expected.Edges.Count; i++)
+            {
+                Assert.AreEqual(expected.Edges[i].Body, actual.Edges[i].Body, "graph model edge step");
+            }
+
+            Assert.AreEqual(expected.Nodes.Count, actual.Nodes.Count, "graph model node steps");
+            for (int i = 0; i < expected.Nodes.Count; i++)
+            {
+                Assert.AreEqual(expected.Nodes[i].Body, actual.Nodes[i].Body, "graph model edge step");
+            }
         }
     }
 }

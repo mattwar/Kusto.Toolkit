@@ -3,33 +3,10 @@ using Kusto.Language.Editor;
 using Kusto.Language.Symbols;
 using Kusto.Language.Syntax;
 using Kusto.Language.Utils;
-using Microsoft.Identity.Client.NativeInterop;
 using System;
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 
 namespace Kusto.Toolkit
 {
-
-    public enum ApplyKind
-    {
-        /// <summary>
-        /// All failures reported
-        /// </summary>
-        Strict,
-
-        /// <summary>
-        /// Skip all commands do not modified schema (cannot be applied)
-        /// </summary>
-        SkipUnhandled, 
-
-        /// <summary>
-        /// Skip all apply failures
-        /// </summary>
-        SkipFailures
-    }
-
     public static partial class GlobalStateExtensions
     {
         /// <summary>
@@ -190,6 +167,18 @@ namespace Kusto.Toolkit
                 nameof(EngineCommands.RenameMaterializedView) =>
                     ApplyRenameMaterializedView(code, commandRoot),
 
+                // graph models
+                nameof(EngineCommands.GraphModelCreateOrAlter) =>
+                    ApplyCreateOrAlterGraphModel(code, commandRoot),
+                nameof(EngineCommands.GraphModelDrop) =>
+                    ApplyDropGraphModel(code, commandRoot),
+                nameof(EngineCommands.GraphSnapshotMake) =>
+                    ApplyMakeGraphSnapshot(code, commandRoot),
+                nameof(EngineCommands.GraphSnapshotDrop) =>
+                    ApplyDropGraphSnapshot(code, commandRoot),
+                nameof(EngineCommands.GraphSnapshotsDrop) =>
+                    ApplyDropGraphSnapshots(code, commandRoot),
+
                 // scripts
                 nameof(EngineCommands.ExecuteDatabaseScript) =>
                     ApplyExecuteDatabaseScript(code, commandRoot),
@@ -198,57 +187,6 @@ namespace Kusto.Toolkit
                         ? new ApplyCommandResult(code.Globals)
                         : new ApplyCommandResult(code.Globals, code.Text, Diagnostics.GetUnhandledCommandKind(commandRoot.CommandKind))
             };
-        }
-
-        private static IReadOnlyList<Diagnostic> GetErrors(IReadOnlyList<Diagnostic> diagnostics)
-        {
-            if (diagnostics.Count > 0 && diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
-            {
-                if (diagnostics.All(d => d.Severity == DiagnosticSeverity.Error))
-                    return diagnostics;
-                return diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToReadOnly();
-            }
-
-            return Array.Empty<Diagnostic>();
-        }
-
-        private static ApplyCommandResult GetErrorResult(KustoCode code, IReadOnlyList<Diagnostic> errors)
-        {
-            return new ApplyCommandResult(code.Globals, code.Text, new[] { Diagnostics.GetCommandHasErrors() }.Concat(errors).ToArray());
-        }
-
-        private static bool HasIfNotExists(CustomCommand commandRoot)
-        {
-            return commandRoot.GetFirstDescendant<SyntaxToken>(tk => tk.Text == "ifnotexists") != null;
-        }
-
-        private static bool HasIfExists(CustomCommand commandRoot)
-        {
-            return commandRoot.GetFirstDescendant<SyntaxToken>(tk => tk.Text == "ifexists") != null;
-        }
-
-        private static ApplyCommandResult GetMissingSyntaxResult(KustoCode code, SyntaxElement? location = null)
-        {
-            var dx = Diagnostics.GetCommandHasMissingElements();
-            if (location != null)
-                dx = dx.WithLocation(location);
-            return new ApplyCommandResult(code.Globals, code.Text, dx);
-        }
-
-        private static ApplyCommandResult GetEntityDoesNotExistResult(KustoCode code, string entityKind, string entityName, SyntaxElement? location = null)
-        {
-            var dx = Diagnostics.GetEntityDoesNotExist(entityKind, entityName);
-            if (location != null)
-                dx = dx.WithLocation(location);
-            return new ApplyCommandResult(code.Globals, code.Text, dx);
-        }
-
-        public static ApplyCommandResult GetEntityAlreadyExistsResult(KustoCode code, string entityKind, string entityName, SyntaxElement? location = null)
-        {
-            var dx = Diagnostics.GetEntityAlreadyExists(entityKind, entityName);
-            if (location != null)
-                dx = dx.WithLocation(location);
-            return new ApplyCommandResult(code.Globals, code.Text, dx);
         }
 
         #region Functions
@@ -1242,6 +1180,130 @@ namespace Kusto.Toolkit
 
         #endregion
 
+        #region Graph Models and Snapshots
+
+        private static ApplyCommandResult ApplyCreateOrAlterGraphModel(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementAfterToken(commandRoot, "graph_model") is { } nameElement
+                && GetName(nameElement) is string name
+                && GetLiteralValueAfterElement(nameElement) is string model)
+            {
+                if (ServerSymbolLoader.GraphModel.TryParse(model, out var graphModel))
+                {
+                    var edges = graphModel.GetEdgeQueries();
+                    var nodes = graphModel.GetNodeQueries();
+                    var newSymbol = code.Globals.Database.GetGraphModel(name) is { } existingModel
+                        ? existingModel.WithEdges(edges).WithNodes(nodes)
+                        : new GraphModelSymbol(name, edges, nodes);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newSymbol);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return new ApplyCommandResult(code.Globals, code.Text, Diagnostics.GetInvalidGraphModel());
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyDropGraphModel(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameAfterToken(commandRoot, "graph_model") is string name)
+            {
+                if (code.Globals.Database.GetGraphModel(name) is { } existingModel)
+                {
+                    var newGlobals = code.Globals.RemoveDatabaseMembers(existingModel);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "graph model", name);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyMakeGraphSnapshot(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetNameAfterToken(commandRoot, "graph_snapshot") is string snapshotName
+                && GetNameAfterToken(commandRoot, "from") is string modelName)
+            {
+                if (code.Globals.Database.GetGraphModel(modelName) is GraphModelSymbol graphModelSymbol)
+                {
+                    if (graphModelSymbol.TryGetSnapshot(snapshotName, out _))
+                        return GetEntityAlreadyExistsResult(code, "graph snapshot", snapshotName);
+
+                    var newModel = graphModelSymbol.WithSnapshots(
+                        graphModelSymbol.GetSnapshotNames().Append(snapshotName));
+
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newModel);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "graph model", modelName);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyDropGraphSnapshot(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementAfterToken(commandRoot, "graph_snapshot") is { } nameElement
+                && TryGetGraphAndSnapshotNames(nameElement, out var graphModelName, out var snapshotName))
+            {
+                if (code.Globals.Database.GetGraphModel(graphModelName) is { } graphModel)
+                {
+                    var newSnapshots = graphModel.GetSnapshotNames().Where(n => n != snapshotName);
+                    var newGraphModel = graphModel.WithSnapshots(newSnapshots);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newGraphModel);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "graph model", graphModelName!);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        private static ApplyCommandResult ApplyDropGraphSnapshots(KustoCode code, CustomCommand commandRoot)
+        {
+            if (GetElementAfterToken(commandRoot, "graph_snapshots") is { } nameElement
+                && TryGetGraphAndSnapshotNames(nameElement, out var graphModelName, out var snapshotNamePattern))
+            {
+                if (code.Globals.Database.GetGraphModel(graphModelName) is { } graphModel)
+                {
+                    var newSnapshots = graphModel.GetSnapshotNames().Where(n => !KustoFacts.Matches(snapshotNamePattern, n));
+                    var newGraphModel = graphModel.WithSnapshots(newSnapshots);
+                    var newGlobals = code.Globals.AddOrUpdateDatabaseMembers(newGraphModel);
+                    return new ApplyCommandResult(newGlobals);
+                }
+                else
+                {
+                    return GetEntityDoesNotExistResult(code, "graph model", graphModelName!);
+                }
+            }
+            else
+            {
+                return GetMissingSyntaxResult(code);
+            }
+        }
+
+        #endregion
+
         #region Execute Script
 
         private static ApplyCommandResult ApplyExecuteDatabaseScript(KustoCode code, CustomCommand commandRoot)
@@ -1264,6 +1326,57 @@ namespace Kusto.Toolkit
         #endregion
 
         #region Helpers
+
+        private static IReadOnlyList<Diagnostic> GetErrors(IReadOnlyList<Diagnostic> diagnostics)
+        {
+            if (diagnostics.Count > 0 && diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
+            {
+                if (diagnostics.All(d => d.Severity == DiagnosticSeverity.Error))
+                    return diagnostics;
+                return diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToReadOnly();
+            }
+
+            return Array.Empty<Diagnostic>();
+        }
+
+        private static ApplyCommandResult GetErrorResult(KustoCode code, IReadOnlyList<Diagnostic> errors)
+        {
+            return new ApplyCommandResult(code.Globals, code.Text, new[] { Diagnostics.GetCommandHasErrors() }.Concat(errors).ToArray());
+        }
+
+        private static bool HasIfNotExists(CustomCommand commandRoot)
+        {
+            return commandRoot.GetFirstDescendant<SyntaxToken>(tk => tk.Text == "ifnotexists") != null;
+        }
+
+        private static bool HasIfExists(CustomCommand commandRoot)
+        {
+            return commandRoot.GetFirstDescendant<SyntaxToken>(tk => tk.Text == "ifexists") != null;
+        }
+
+        private static ApplyCommandResult GetMissingSyntaxResult(KustoCode code, SyntaxElement? location = null)
+        {
+            var dx = Diagnostics.GetCommandHasMissingElements();
+            if (location != null)
+                dx = dx.WithLocation(location);
+            return new ApplyCommandResult(code.Globals, code.Text, dx);
+        }
+
+        private static ApplyCommandResult GetEntityDoesNotExistResult(KustoCode code, string entityKind, string entityName, SyntaxElement? location = null)
+        {
+            var dx = Diagnostics.GetEntityDoesNotExist(entityKind, entityName);
+            if (location != null)
+                dx = dx.WithLocation(location);
+            return new ApplyCommandResult(code.Globals, code.Text, dx);
+        }
+
+        public static ApplyCommandResult GetEntityAlreadyExistsResult(KustoCode code, string entityKind, string entityName, SyntaxElement? location = null)
+        {
+            var dx = Diagnostics.GetEntityAlreadyExists(entityKind, entityName);
+            if (location != null)
+                dx = dx.WithLocation(location);
+            return new ApplyCommandResult(code.Globals, code.Text, dx);
+        }
 
         private static IReadOnlyList<ColumnSymbol> MergeColumns(IReadOnlyList<ColumnSymbol> existingColumns, IReadOnlyList<ColumnSymbol> newColumns)
         {
@@ -1361,6 +1474,27 @@ namespace Kusto.Toolkit
             database = null;
             table = null;
             column = null;
+            return false;
+        }
+
+        private static bool TryGetGraphAndSnapshotNames(SyntaxElement expr, out string? graphModelName, out string? snapshotName)
+        {
+            if (expr is CustomNode && expr.ChildCount == 1)
+            {
+                return TryGetGraphAndSnapshotNames(expr.GetChild(0), out graphModelName, out snapshotName);
+            }
+            
+            if (expr is PathExpression graphPath
+                && GetName(graphPath.Expression) is string graphName
+                && GetName(graphPath.Selector) is string snapName)
+            {
+                graphModelName = graphName;
+                snapshotName = snapName;
+                return true;
+            }
+
+            graphModelName = null;
+            snapshotName = null;
             return false;
         }
 
@@ -1681,6 +1815,33 @@ namespace Kusto.Toolkit
         #endregion
     }
 
+    /// <summary>
+    /// Specifies the behavior for handling schema application commands and failures.
+    /// </summary>
+    /// <remarks>This enumeration defines the strategies for processing schema commands, particularly in
+    /// scenarios where some commands may fail or be unhandled. It allows the caller to choose how strictly to enforce
+    /// command application and how to handle errors.</remarks>
+    public enum ApplyKind
+    {
+        /// <summary>
+        /// All failures reported
+        /// </summary>
+        Strict,
+
+        /// <summary>
+        /// Skip all commands do not modified schema (cannot be applied)
+        /// </summary>
+        SkipUnhandled,
+
+        /// <summary>
+        /// Skip all apply failures
+        /// </summary>
+        SkipFailures
+    }
+
+    /// <summary>
+    /// Represents the result of applying a command, including any errors encountered and the updated global state.
+    /// </summary>
     public sealed class ApplyCommandResult
     {
         /// <summary>

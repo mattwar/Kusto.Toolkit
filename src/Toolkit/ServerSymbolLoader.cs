@@ -6,6 +6,8 @@ using Kusto.Language;
 using Kusto.Language.Symbols;
 using Kusto.Data.Common;
 using System.ComponentModel;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 
 #nullable disable // some day...
@@ -168,6 +170,7 @@ namespace Kusto.Toolkit
             var materializedViews = await LoadMaterializedViewsAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
             var functions = await LoadFunctionsAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
             var entityGroups = await LoadEntityGroupsAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
+            var graphModels = await LoadGraphModelAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
 
             var members = new List<Symbol>();
             members.AddRange(tables);
@@ -175,6 +178,7 @@ namespace Kusto.Toolkit
             members.AddRange(materializedViews);
             members.AddRange(functions);
             members.AddRange(entityGroups);
+            members.AddRange(graphModels);
 
             var databaseSymbol = new DatabaseSymbol(dbName.Name, dbName.PrettyName, members);
             return databaseSymbol;
@@ -260,7 +264,7 @@ namespace Kusto.Toolkit
             {
                 foreach (var mv in materializedViews)
                 {
-                    var mvSchemas = await ExecuteControlCommandAsync<LoadMeterializedViewsResult2>(
+                    var mvSchemas = await ExecuteControlCommandAsync<LoadMaterializedViewsResult2>(
                         provider, databaseName, 
                         $".show materialized-view {KustoFacts.GetBracketedName(mv.Name)} cslschema | project TableName, Schema", 
                         throwOnError, cancellationToken)
@@ -315,6 +319,50 @@ namespace Kusto.Toolkit
                 return null;
 
             return entityGroups.Select(eg => new EntityGroupSymbol(eg.Name, eg.Entities)).ToList();
+        }
+
+        private async Task<IReadOnlyList<GraphModelSymbol>> LoadGraphModelAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        {
+            var graphModelSymbols = new List<GraphModelSymbol>();
+
+            var graphModels = await ExecuteControlCommandAsync<LoadGraphModelResult>(
+                provider, databaseName,
+                ".show graph_models details | project Name, Model",
+                throwOnError, cancellationToken)
+                .ConfigureAwait(false);
+
+            var graphModelSnapshots = await ExecuteControlCommandAsync<LoadGraphModelSnapshotsResult>(
+                provider, databaseName,
+                ".show graph_snapshots * | summarize Snapshots=make_list(Name) by ModelName",
+                throwOnError, cancellationToken)
+                .ConfigureAwait(false);
+
+            var snapshotMap = graphModelSnapshots.ToDictionary(snaps => snaps.ModelName, snaps => snaps.Snapshots);
+                
+            if (graphModels == null)
+                return null;
+
+            return graphModels.Select(gm => CreateGraphModel(gm.Name, gm.Model, snapshotMap?[gm.Name])).ToList();
+        }
+
+        private GraphModelSymbol CreateGraphModel(string name, string model, string snapshots)
+        {
+            var snapshotNames = JsonConvert.DeserializeObject<string[]>(snapshots);
+
+            if (GraphModel.TryParse(model, out var graphModel))
+            {
+                var symbol = new GraphModelSymbol(
+                    name,
+                    edges: graphModel.GetEdgeQueries(),
+                    nodes: graphModel.GetNodeQueries(),
+                    snapshots: snapshotNames
+                    );
+                return symbol;
+            }
+            else
+            {
+                return new GraphModelSymbol(name, snapshots: snapshotNames);
+            }
         }
 
         /// <summary>
@@ -409,7 +457,7 @@ namespace Kusto.Toolkit
             public string DocString;
         }
 
-        public class LoadMeterializedViewsResult2
+        public class LoadMaterializedViewsResult2
         {
             public string Name;
             public string Schema;
@@ -427,6 +475,106 @@ namespace Kusto.Toolkit
         {
             public string Name;
             public string Entities;
+        }
+
+        public class LoadGraphModelResult
+        {
+            public string Name;
+            public string Model;
+        }
+
+        public class LoadGraphModelSnapshotsResult
+        {
+            public string ModelName;
+            public string Snapshots;
+        }
+
+        public class GraphModel
+        {
+            public string Schema;
+            public GraphModelDefinition Definition;
+
+            public static bool TryParse(string text, out GraphModel model)
+            {
+                model = JsonConvert.DeserializeObject<GraphModel>(text);
+                return model != null;
+            }
+
+            public override string ToString()
+            {
+                return JsonConvert.SerializeObject(this);
+            }
+
+            private IReadOnlyList<string> _edgeQueries;
+            public IReadOnlyList<string> GetEdgeQueries() =>
+                _edgeQueries ??= Definition?.Steps?.OfType<GraphModelEdgeStep>()?.Select(step => step.Query).ToArray() ?? Array.Empty<string>();
+
+            private IReadOnlyList<string> _nodeQueries;
+            public IReadOnlyList<string> GetNodeQueries() =>
+                _nodeQueries ??= Definition?.Steps?.OfType<GraphModelNodeStep>()?.Select(step => step.Query).ToArray() ?? Array.Empty<string>();
+        }
+
+        public class GraphModelDefinition
+        {
+            public List<GraphModelStep> Steps;
+        }
+
+        [JsonConverter(typeof(GraphModelStepConverter))]
+        public abstract class GraphModelStep
+        {
+            public string Query;
+            public string[] Labels;
+            public string LabelsIdColumn;
+        }
+
+        public sealed class GraphModelNodeStep : GraphModelStep
+        {
+            public string NodeColumn;
+        }
+
+        public sealed class GraphModelEdgeStep : GraphModelStep
+        {
+            public string SourceColumn;
+            public string TargetColumn;
+        }
+
+        public class GraphModelStepConverter : JsonConverter
+        {
+            public override bool CanConvert(Type objectType) =>
+                objectType == typeof(GraphModelStep);
+
+            public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+            {
+                var obj = JObject.Load(reader);
+                var kind = (string)obj["Kind"];
+                GraphModelStep step = kind switch
+                {
+                    "AddNodes" => new GraphModelNodeStep(),
+                    "AddEdges" => new GraphModelEdgeStep(),
+                    _ => throw new InvalidOperationException($"Unknown graph model step kind: {kind}")
+                };
+                serializer.Populate(obj.CreateReader(), step);
+                return step;
+            }
+
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+            {
+                if (value is GraphModelStep step)
+                {
+                    var obj = JObject.FromObject(value);
+                    var kind = step switch
+                    {
+                        GraphModelNodeStep => "AddNodes",
+                        GraphModelEdgeStep => "AddEdges",
+                        _ => throw new InvalidOperationException($"Unknown graph model step type: '{step.GetType().Name}'")
+                    };
+                    obj.AddFirst(new JProperty("Kind", kind));
+                }
+                else
+                {
+                    throw new NotSupportedException($"The value is not type GraphModelStep");
+                }
+            }
         }
     }
 }
