@@ -6,8 +6,9 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Kusto.Toolkit;
 using Kusto.Data;
+using Kusto.Data.Exceptions;
 
-namespace Tests
+namespace Tests.Integration
 {
     [TestClass]
     public class CachedSymbolLoaderTests : SymbolLoaderTestBase
@@ -58,8 +59,10 @@ namespace Tests
                 var dbNamesFilePath = loader.FileLoader.GetDatabaseNamesPath("unknown_cluster");
                 Assert.IsFalse(File.Exists(dbNamesFilePath));
 
-                var dbNames = await loader.LoadDatabaseNamesAsync("unknown_cluster");
-                Assert.IsNull(dbNames);
+                await Assert.ThrowsAsync<KustoException>(async () =>
+                {
+                    var _ = await loader.LoadDatabaseNamesAsync("unknown_cluster");
+                });
 
                 loader.FileLoader.DeleteCache();
             }
@@ -114,13 +117,16 @@ namespace Tests
 
             using (var loader = CreateLoader())
             {
-                var dbCachePath = loader.FileLoader.GetDatabaseCachePath("Samples", "unknown_cluster");
-                Assert.IsFalse(File.Exists(dbCachePath));
+                await Assert.ThrowsAsync<KustoException>(async () =>
+                {
+                    var dbCachePath = loader.FileLoader.GetDatabaseCachePath("Samples", "unknown_cluster");
+                    Assert.IsFalse(File.Exists(dbCachePath));
 
-                var db = await loader.LoadDatabaseAsync("Samples", "unknown_cluster");
-                Assert.IsNull(db);
+                    var db = await loader.LoadDatabaseAsync("Samples", "unknown_cluster");
+                    Assert.IsNull(db);
 
-                Assert.IsFalse(File.Exists(dbCachePath));
+                    Assert.IsFalse(File.Exists(dbCachePath));
+                });
 
                 var cachedDb = await loader.FileLoader.LoadDatabaseAsync("Samples");
                 Assert.IsNull(cachedDb);

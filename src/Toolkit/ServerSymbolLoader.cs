@@ -1,13 +1,14 @@
 ﻿using Kusto.Cloud.Platform.Data;
 using Kusto.Data;
+using Kusto.Data.Common;
 using Kusto.Data.Data;
 using Kusto.Data.Net.Client;
 using Kusto.Language;
 using Kusto.Language.Symbols;
-using Kusto.Data.Common;
-using System.ComponentModel;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.ComponentModel;
+using System.Diagnostics.Metrics;
 
 
 #nullable disable // some day...
@@ -25,6 +26,7 @@ namespace Kusto.Toolkit
         private readonly string _defaultClusterName;
         private readonly string _defaultDomain;
         private readonly Dictionary<string, ICslAdminProvider> _dataSourceToAdminProviderMap = new Dictionary<string, ICslAdminProvider>();
+        private readonly Dictionary<string, KustoConnectionStringBuilder> _clusterToBuidlerMap = new Dictionary<string, KustoConnectionStringBuilder>();
         private readonly Dictionary<string, HashSet<string>> _clusterToBadDbNameMap = new Dictionary<string, HashSet<string>>();
 
         /// <summary>
@@ -84,37 +86,20 @@ namespace Kusto.Toolkit
         }
 
         /// <summary>
-        /// Gets or Creates an admin provider instance.
-        /// </summary>
-        private ICslAdminProvider GetOrCreateAdminProvider(KustoConnectionStringBuilder connection)
-        {
-            if (!_dataSourceToAdminProviderMap.TryGetValue(connection.DataSource, out var provider))
-            {
-                provider = KustoClientFactory.CreateCslAdminProvider(connection);
-                _dataSourceToAdminProviderMap.Add(connection.DataSource, provider);
-            }
-
-            return provider;
-        }
-
-        /// <summary>
         /// Loads a list of database names for the specified cluster.
         /// If the cluster name is not specified, the loader's default cluster name is used.
         /// Returns null if the cluster is not found.
         /// </summary>
-        public override async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public override async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, CancellationToken cancellationToken = default)
         {
             clusterName = string.IsNullOrEmpty(clusterName)
                 ? _defaultClusterName
                 : GetFullHostName(clusterName, _defaultDomain);
 
-            var connection = GetClusterConnection(clusterName);
-            var provider = GetOrCreateAdminProvider(connection);
-
             var databases = await ExecuteControlCommandAsync<DatabaseNamesResult>(
-                provider, database: "", 
+                clusterName, database: "", 
                 ".show databases | project DatabaseName, PrettyName",
-                throwOnError, cancellationToken)
+                cancellationToken)
                 .ConfigureAwait(false);
 
             return databases?.Select(d => new DatabaseName(d.DatabaseName, d.PrettyName)).ToArray();
@@ -142,7 +127,7 @@ namespace Kusto.Toolkit
         /// If the cluster name is not specified, the loader's default cluster name is used.
         /// Returns null if the database is not found.
         /// </summary>
-        public override async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public override async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, CancellationToken cancellationToken = default)
         {
             if (databaseName == null)
                 throw new ArgumentNullException(nameof(databaseName));
@@ -155,30 +140,33 @@ namespace Kusto.Toolkit
             if (IsBadDatabaseName(clusterName, databaseName))
                 return null;
 
-            var connection = GetClusterConnection(clusterName);
-            var provider = GetOrCreateAdminProvider(connection);
-
-            var dbName = await GetBothDatabaseNamesAsync(provider, databaseName, throwOnError, cancellationToken).ConfigureAwait(false);
+            var dbName = await GetBothDatabaseNamesAsync(clusterName, databaseName, cancellationToken).ConfigureAwait(false);
             if (dbName == null)
             {
                 AddBadDatabaseName(clusterName, databaseName);
                 return null;
             }
 
-            var tables = await LoadTablesAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
-            var externalTables = await LoadExternalTablesAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
-            var materializedViews = await LoadMaterializedViewsAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
-            var functions = await LoadFunctionsAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
-            var entityGroups = await LoadEntityGroupsAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
-            var graphModels = await LoadGraphModelAsync(provider, dbName.Name, throwOnError, cancellationToken).ConfigureAwait(false);
+            var tables = await LoadTablesAsync(clusterName, dbName.Name, cancellationToken).ConfigureAwait(false);
+            var externalTables = await LoadExternalTablesAsync(clusterName, dbName.Name, cancellationToken).ConfigureAwait(false);
+            var materializedViews = await LoadMaterializedViewsAsync(clusterName, dbName.Name, cancellationToken).ConfigureAwait(false);
+            var functions = await LoadFunctionsAsync(clusterName, dbName.Name, cancellationToken).ConfigureAwait(false);
+            var entityGroups = await LoadEntityGroupsAsync(clusterName, dbName.Name, cancellationToken).ConfigureAwait(false);
+            var graphModels = await LoadGraphModelAsync(clusterName, dbName.Name, cancellationToken).ConfigureAwait(false);
 
             var members = new List<Symbol>();
-            members.AddRange(tables);
-            members.AddRange(externalTables);
-            members.AddRange(materializedViews);
-            members.AddRange(functions);
-            members.AddRange(entityGroups);
-            members.AddRange(graphModels);
+            if (tables != null)
+                members.AddRange(tables);
+            if (externalTables != null)
+                members.AddRange(externalTables);
+            if (materializedViews != null)
+                members.AddRange(materializedViews);
+            if (functions != null)
+                members.AddRange(functions);
+            if (entityGroups != null)
+                members.AddRange(entityGroups);
+            if (graphModels != null)
+                members.AddRange(graphModels);
 
             var databaseSymbol = new DatabaseSymbol(dbName.Name, dbName.PrettyName, members);
             return databaseSymbol;
@@ -187,13 +175,13 @@ namespace Kusto.Toolkit
         /// <summary>
         /// Returns the database name and pretty name given either the database name or the pretty name.
         /// </summary>
-        private async Task<DatabaseName> GetBothDatabaseNamesAsync(ICslAdminProvider provider, string databaseNameOrPrettyName, bool throwOnError, CancellationToken cancellationToken)
+        protected virtual async Task<DatabaseName> GetBothDatabaseNamesAsync(string cluster, string databaseNameOrPrettyName, CancellationToken cancellationToken)
         {
             var dbInfos = await ExecuteControlCommandAsync<DatabaseNamesResult>(
-                provider,
-                database: databaseNameOrPrettyName,
+                cluster,
+                databaseNameOrPrettyName,
                 $".show database identity | project DatabaseName, PrettyName",
-                throwOnError, cancellationToken)
+                cancellationToken)
                 .ConfigureAwait(false);
 
             var dbInfo = dbInfos?.FirstOrDefault();
@@ -203,146 +191,122 @@ namespace Kusto.Toolkit
                 : null;
         }
 
-        private async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        protected virtual async Task<IReadOnlyList<TableSymbol>> LoadTablesAsync(string cluster, string database, CancellationToken cancellationToken)
         {
             // get table schema from .show database xxx cslschema
             var tableSchemas = await ExecuteControlCommandAsync<LoadTablesResult>(
-                provider, databaseName,
-                $".show database {KustoFacts.GetBracketedName(databaseName)} cslschema | project TableName, Schema, DocString",
-                throwOnError, cancellationToken)
+                cluster, database,
+                $".show database {KustoFacts.GetBracketedName(database)} cslschema | project TableName, Schema, DocString",
+                cancellationToken)
                 .ConfigureAwait(false);
 
-            if (tableSchemas == null)
-                return null;
-
-            var tables = tableSchemas.Select(schema => new TableSymbol(schema.TableName, "(" + schema.Schema + ")", schema.DocString)).ToList();
-            return tables;
+            return tableSchemas?.Select(schema => new TableSymbol(schema.TableName, "(" + schema.Schema + ")", schema.DocString)).ToList();
         }
 
-        private async Task<IReadOnlyList<TableSymbol>> LoadExternalTablesAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        protected virtual async Task<IReadOnlyList<TableSymbol>> LoadExternalTablesAsync(string cluster, string database, CancellationToken cancellationToken)
         {
-            var tables = new List<TableSymbol>();
-
             // get external tables from .show external tables and .show external table xxx cslschema
             var externalTables = await ExecuteControlCommandAsync<LoadExternalTablesResult1>(
-                provider, databaseName, 
+                cluster, database, 
                 ".show external tables | project TableName, DocString", 
-                throwOnError, cancellationToken);
-            if (externalTables != null)
-            {
-                foreach (var et in externalTables)
-                {
-                    var etSchemas = await ExecuteControlCommandAsync<LoadExternalTablesResult2>(
-                        provider, databaseName,
-                        $".show external table {KustoFacts.GetBracketedName(et.TableName)} cslschema | project TableName, Schema",
-                        throwOnError, cancellationToken)
-                        .ConfigureAwait(false);
+                cancellationToken);
 
-                    if (etSchemas != null && etSchemas.Length > 0)
-                    {
-                        var mvSymbol = new ExternalTableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString);
-                        tables.Add(mvSymbol);
-                    }
-                }
+            if (externalTables == null)
+                return null;
+
+            var externalTableSymbols = new List<TableSymbol>();
+
+            foreach (var et in externalTables)
+            {
+                var etSchemas = await ExecuteControlCommandAsync<LoadExternalTablesResult2>(
+                    cluster, database,
+                    $".show external table {KustoFacts.GetBracketedName(et.TableName)} cslschema | project TableName, Schema",
+                    cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (etSchemas != null && etSchemas.Length > 0)
+                {
+                    var mvSymbol = new ExternalTableSymbol(et.TableName, "(" + etSchemas[0].Schema + ")", et.DocString);
+                    externalTableSymbols.Add(mvSymbol);
+                }           
             }
 
-            return tables;
+            return externalTableSymbols;
         }
 
-        private async Task<IReadOnlyList<TableSymbol>> LoadMaterializedViewsAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        protected virtual async Task<IReadOnlyList<TableSymbol>> LoadMaterializedViewsAsync(string cluster, string databaseName, CancellationToken cancellationToken)
         {
-            var tables = new List<TableSymbol>();
-
             // get materialized views from .show materialized-views and .show materialized-view xxx cslschema
             var materializedViews = await ExecuteControlCommandAsync<LoadMaterializedViewsResult1>(
-                provider, databaseName,
+                cluster, databaseName,
                 ".show materialized-views | project Name, Query, DocString",
-                throwOnError, cancellationToken)
+                cancellationToken)
                 .ConfigureAwait(false);
 
-            if (materializedViews != null)
-            {
-                foreach (var mv in materializedViews)
-                {
-                    var mvSchemas = await ExecuteControlCommandAsync<LoadMaterializedViewsResult2>(
-                        provider, databaseName, 
-                        $".show materialized-view {KustoFacts.GetBracketedName(mv.Name)} cslschema | project TableName, Schema", 
-                        throwOnError, cancellationToken)
-                        .ConfigureAwait(false);
+            if (materializedViews == null)
+                return null;
 
-                    if (mvSchemas != null && mvSchemas.Length > 0)
-                    {
-                        var mvSymbol = new MaterializedViewSymbol(mv.Name, "(" + mvSchemas[0].Schema + ")", mv.Query, mv.DocString);
-                        tables.Add(mvSymbol);
-                    }
+            var materializedViewSymbols = new List<TableSymbol>();
+
+            foreach (var mv in materializedViews)
+            {
+                var mvSchemas = await ExecuteControlCommandAsync<LoadMaterializedViewsResult2>(
+                    cluster, databaseName, 
+                    $".show materialized-view {KustoFacts.GetBracketedName(mv.Name)} cslschema | project TableName, Schema", 
+                    cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (mvSchemas != null && mvSchemas.Length > 0)
+                {
+                    var mvSymbol = new MaterializedViewSymbol(mv.Name, "(" + mvSchemas[0].Schema + ")", mv.Query, mv.DocString);
+                    materializedViewSymbols.Add(mvSymbol);
                 }
             }
 
-            return tables;
+            return materializedViewSymbols;
         }
 
-        private async Task<IReadOnlyList<FunctionSymbol>> LoadFunctionsAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        protected virtual async Task<IReadOnlyList<FunctionSymbol>> LoadFunctionsAsync(string cluster, string databaseName, CancellationToken cancellationToken)
         {
-            var functions = new List<FunctionSymbol>();
-
             // get functions for .show functions
             var functionSchemas = await ExecuteControlCommandAsync<LoadFunctionsResult>(
-                provider, databaseName, 
+                cluster, databaseName, 
                 ".show functions | project Name, Parameters, Body, DocString", 
-                throwOnError, cancellationToken)
+                cancellationToken)
                 .ConfigureAwait(false);
 
-            if (functionSchemas == null)
-                return null;
-
-            foreach (var fun in functionSchemas)
-            {
-                var functionSymbol = new FunctionSymbol(fun.Name, fun.Parameters, fun.Body, fun.DocString);
-                functions.Add(functionSymbol);
-            }
-
-            return functions;
+            return functionSchemas?.Select(fun => new FunctionSymbol(fun.Name, fun.Parameters, fun.Body, fun.DocString)).ToList();
         }
 
-        private async Task<IReadOnlyList<EntityGroupSymbol>> LoadEntityGroupsAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        protected virtual async Task<IReadOnlyList<EntityGroupSymbol>> LoadEntityGroupsAsync(string cluster, string databaseName, CancellationToken cancellationToken)
         {
-            var entityGroupSymbols = new List<EntityGroupSymbol>();
-
             // get entity groups via .show entity_groups
             var entityGroups = await ExecuteControlCommandAsync<LoadEntityGroupsResult>(
-                provider, databaseName, 
+                cluster, databaseName, 
                 ".show entity_groups | project Name, Entities",
-                throwOnError, cancellationToken)
+                cancellationToken)
                 .ConfigureAwait(false);
 
-            if (entityGroups == null)
-                return null;
-
-            return entityGroups.Select(eg => new EntityGroupSymbol(eg.Name, eg.Entities)).ToList();
+            return entityGroups?.Select(eg => new EntityGroupSymbol(eg.Name, eg.Entities)).ToList();
         }
 
-        private async Task<IReadOnlyList<GraphModelSymbol>> LoadGraphModelAsync(ICslAdminProvider provider, string databaseName, bool throwOnError, CancellationToken cancellationToken)
+        protected virtual async Task<IReadOnlyList<GraphModelSymbol>> LoadGraphModelAsync(string cluster, string databaseName, CancellationToken cancellationToken)
         {
-            var graphModelSymbols = new List<GraphModelSymbol>();
-
             var graphModels = await ExecuteControlCommandAsync<LoadGraphModelResult>(
-                provider, databaseName,
+                cluster, databaseName,
                 ".show graph_models details | project Name, Model",
-                throwOnError, cancellationToken)
+                cancellationToken)
                 .ConfigureAwait(false);
 
             var graphModelSnapshots = await ExecuteControlCommandAsync<LoadGraphModelSnapshotsResult>(
-                provider, databaseName,
+                cluster, databaseName,
                 ".show graph_snapshots * | summarize Snapshots=make_list(Name) by ModelName",
-                throwOnError, cancellationToken)
+                cancellationToken)
                 .ConfigureAwait(false);
 
-            var snapshotMap = graphModelSnapshots.ToDictionary(snaps => snaps.ModelName, snaps => snaps.Snapshots);
-                
-            if (graphModels == null)
-                return null;
+            var snapshotMap = graphModelSnapshots?.ToDictionary(snaps => snaps.ModelName, snaps => snaps.Snapshots);
 
-            return graphModels.Select(gm => CreateGraphModel(gm.Name, gm.Model, snapshotMap?[gm.Name])).ToList();
+            return graphModels?.Select(gm => CreateGraphModel(gm.Name, gm.Model, snapshotMap?[gm.Name])).ToList();
         }
 
         private GraphModelSymbol CreateGraphModel(string name, string model, string snapshots)
@@ -368,34 +332,65 @@ namespace Kusto.Toolkit
         /// <summary>
         /// Executes a query or command against a kusto cluster and returns a sequence of result row instances.
         /// </summary>
-        private async Task<T[]> ExecuteControlCommandAsync<T>(ICslAdminProvider provider, string database, string command, bool throwOnError, CancellationToken cancellationToken)
+        protected virtual async Task<T[]> ExecuteControlCommandAsync<T>(string cluster, string database, string command, CancellationToken cancellationToken)
         {
-            try
-            {
-                var resultReader = await provider.ExecuteControlCommandAsync(database, command).ConfigureAwait(false);
-                
-                var results = KustoDataReaderParser.ParseV1(resultReader, null);
-                
-                var primaryResults = results.GetMainResultsOrNull();
-                if (primaryResults != null)
-                {
-                    var tableReader = primaryResults.TableData.CreateDataReader();
-                    var objectReader = new ObjectReader<T>(tableReader);
-                    return objectReader.ToArray();
-                }
+            var connection = GetConnectionBuilder(cluster);
+            var provider = GetOrCreateAdminProvider(connection);
 
+            var resultReader = await provider.ExecuteControlCommandAsync(database, command).ConfigureAwait(false);
+
+            var results = KustoDataReaderParser.ParseV1(resultReader, null);
+
+            var primaryResults = results.GetMainResultsOrNull();
+            if (primaryResults == null)
                 return null;
-            }
-            catch (Exception) when (!throwOnError)
-            {
-                return null;
-            }
+
+            var tableReader = primaryResults.TableData.CreateDataReader();
+            var objectReader = new ObjectReader<T>(tableReader);
+            return objectReader.ToArray();
         }
 
+        /// <summary>
+        /// Gets the host name from the connection builder.
+        /// </summary>
         private string GetHost(KustoConnectionStringBuilder connection) =>
-            new Uri(connection.DataSource).Host;
+            connection != null && !string.IsNullOrWhiteSpace(connection.DataSource)
+                ? new Uri(connection.DataSource).Host
+                : "";
 
-        private KustoConnectionStringBuilder GetClusterConnection(string clusterUriOrName)
+        /// <summary>
+        /// Gets or Creates an admin provider instance.
+        /// </summary>
+        private ICslAdminProvider GetOrCreateAdminProvider(KustoConnectionStringBuilder connection)
+        {
+            if (!_dataSourceToAdminProviderMap.TryGetValue(connection.DataSource, out var provider))
+            {
+                provider = KustoClientFactory.CreateCslAdminProvider(connection);
+                _dataSourceToAdminProviderMap.Add(connection.DataSource, provider);
+            }
+
+            return provider;
+        }
+
+        /// <summary>
+        /// Creates a <see cref="ICslAdminProvider"/> for the connection.
+        /// </summary>
+        protected virtual ICslAdminProvider CreateAdminProvider(KustoConnectionStringBuilder connection)
+        {
+            return KustoClientFactory.CreateCslAdminProvider(connection);
+        }
+
+        private KustoConnectionStringBuilder GetConnectionBuilder(string clusterUriOrName)
+        {
+            if (!_clusterToBuidlerMap.TryGetValue(clusterUriOrName, out var builder))
+            {
+                builder = CreateConnectionBuilder(clusterUriOrName);
+                _clusterToBuidlerMap.Add(clusterUriOrName, builder);
+            }
+            return builder;
+        }
+
+        protected virtual KustoConnectionStringBuilder CreateConnectionBuilder(string clusterUriOrName)
         {
             if (string.IsNullOrEmpty(clusterUriOrName)
                 || clusterUriOrName == _defaultClusterName)
@@ -569,6 +564,7 @@ namespace Kusto.Toolkit
                         _ => throw new InvalidOperationException($"Unknown graph model step type: '{step.GetType().Name}'")
                     };
                     obj.AddFirst(new JProperty("Kind", kind));
+                    obj.WriteTo(writer);
                 }
                 else
                 {

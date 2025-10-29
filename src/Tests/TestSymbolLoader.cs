@@ -9,14 +9,14 @@ using Kusto.Toolkit;
 
 namespace Tests
 {
-    public class TestLoader : SymbolLoader
+    public class TestSymbolLoader : SymbolLoader
     {
         public override string DefaultCluster { get; }
         public override string DefaultDomain { get; }
 
         private readonly IReadOnlyList<ClusterSymbol> _clusters;
 
-        public TestLoader(IReadOnlyList<ClusterSymbol> clusters, string defaultCluster = null, string defaultDomain = null)
+        public TestSymbolLoader(IReadOnlyList<ClusterSymbol> clusters, string defaultCluster = null, string defaultDomain = null)
         {
             this.DefaultDomain = defaultDomain ?? KustoFacts.KustoWindowsNet;
             this.DefaultCluster = defaultCluster != null
@@ -25,7 +25,7 @@ namespace Tests
             _clusters = clusters;
         }
 
-        public override Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public override Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, CancellationToken cancellationToken = default)
         {
             var cluster = _clusters.FirstOrDefault(c => c.Name == clusterName);
             if (cluster != null)
@@ -39,7 +39,7 @@ namespace Tests
             }
         }
 
-        public override Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public override Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, CancellationToken cancellationToken = default)
         {
             clusterName ??= this.DefaultCluster;
 

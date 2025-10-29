@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Kusto.Language;
 using Kusto.Language.Symbols;
@@ -283,5 +284,168 @@ namespace Kusto.Toolkit
         /// </summary>
         public static IReadOnlyList<string> GetSnapshotNames(this GraphModelSymbol graphModel) =>
             graphModel.Snapshots.Select(sn => sn.Name).ToList();
+
+
+        /// <summary>
+        /// Gets the <see cref="DatabaseSymbol"/> containing this <see cref="TableSymbol"/>.
+        /// </summary>
+        public static bool TryGetDatabase(this TableSymbol table, GlobalState globals, out DatabaseSymbol database) =>
+            TryGetDatabase((Symbol)table, globals, out database);
+
+        /// <summary>
+        /// Gets the <see cref="DatabaseSymbol"/> containing this <see cref="FunctionSymbol"/>
+        /// </summary>
+        public static bool TryGetDatabase(this FunctionSymbol function, GlobalState globals, out DatabaseSymbol database) =>
+            TryGetDatabase((Symbol)function, globals, out database);
+
+        /// <summary>
+        /// Gets the <see cref="DatabaseSymbol"/> containing this <see cref="GraphModelSymbol"/>.
+        /// </summary>
+        public static bool TryGetDatabase(this GraphModelSymbol graphModel, GlobalState globals, out DatabaseSymbol database) =>
+            TryGetDatabase((Symbol)graphModel, globals, out database);
+
+        /// <summary>
+        /// Gets the <see cref="DatabaseSymbol"/> containing this <see cref="Symbol"/>
+        /// </summary>
+        public static bool TryGetDatabase(Symbol symbol, GlobalState globals, out DatabaseSymbol database)
+        {
+            database = globals.GetDatabase(symbol);
+            return database != null;
+        }
+
+        /// <summary>
+        /// Gets the <see cref="ClusterSymbol"/> containing this <see cref="DatabaseSymbol"/>
+        /// </summary>
+        public static bool TryGetCluster(this DatabaseSymbol database, GlobalState globals, out ClusterSymbol cluster)
+        {
+            cluster = globals.GetCluster(database);
+            return cluster != null;
+        }
+
+        /// <summary>
+        /// Gets the <see cref="ClusterSymbol"/> and <see cref="DatabaseSymbol"/> containing this <see cref="TableSymbol"/>>.
+        /// </summary>
+        public static bool TryGetClusterAndDatabase(this TableSymbol table, GlobalState globals, out ClusterSymbol cluster, out DatabaseSymbol database) =>
+            TryGetClusterAndDatabase((Symbol)table, globals, out cluster, out database);
+
+        /// <summary>
+        /// Gets the <see cref="ClusterSymbol"/> and <see cref="DatabaseSymbol"/> corresponding this <see cref="FunctionSymbol"/>.
+        /// </summary>
+        public static bool TryGetClusterAndDatabase(this FunctionSymbol function, GlobalState globals, out ClusterSymbol cluster, out DatabaseSymbol database) =>
+            TryGetClusterAndDatabase((Symbol)function, globals, out cluster, out database);
+
+        /// <summary>
+        /// Gets the <see cref="ClusterSymbol"/> and <see cref="DatabaseSymbol"/> corresponding this <see cref="GraphModelSymbol"/>.
+        /// </summary>
+        public static bool TryGetClusterAndDatabase(this GraphModelSymbol graphModel, GlobalState globals, out ClusterSymbol cluster, out DatabaseSymbol database) =>
+            TryGetClusterAndDatabase((Symbol)graphModel, globals, out cluster, out database);
+
+        /// <summary>
+        /// Gets the <see cref="ClusterSymbol"/> and <see cref="DatabaseSymbol"/> corresponding this <see cref="Symbol"/>.
+        /// </summary>
+        public static bool TryGetClusterAndDatabase(Symbol symbol, GlobalState globals, out ClusterSymbol cluster, out DatabaseSymbol database)
+        {
+            database = globals.GetDatabase(symbol);
+            cluster = globals.GetCluster(database);
+            return database != null && cluster != null;
+        }
+
+        /// <summary>
+        /// Gets the <see cref="TableSymbol"/> containing this <see cref="ColumnSymbol"/>
+        /// </summary>
+        public static bool TryGetTable(this ColumnSymbol column, GlobalState globals, out TableSymbol table)
+        {
+            table = globals.GetTable(column);
+            return table != null;
+        }
+
+        /// <summary>
+        /// Gets the <see cref="DatabaseSymbol"/> and <see cref="TableSymbol"/> containing this <see cref="ColumnSymbol"/>.
+        /// </summary>
+        public static bool TryGetDatabaseAndTable(this ColumnSymbol column, GlobalState globals, out DatabaseSymbol database, out TableSymbol table)
+        {
+            table = globals.GetTable(column);
+            database = globals.GetDatabase(table);
+            return table != null && database != null;
+        }
+
+        /// <summary>
+        /// Gets the <see cref="ClusterSymbol"/>, <see cref="DatabaseSymbol"/> and <see cref="TableSymbol"/> containing this column.
+        /// </summary>
+        public static bool TryGetClusterDatabaseAndTable(this ColumnSymbol column, GlobalState globals, out ClusterSymbol cluster, out DatabaseSymbol database, out TableSymbol table)
+        {
+            table = globals.GetTable(column);
+            database = globals.GetDatabase(table);
+            cluster = globals.GetCluster(database);
+            return table != null && database != null && cluster != null;
+        }
+
+        /// <summary>
+        /// Gets the minimal KQL expression that references the symbol.
+        /// </summary>
+        public static string GetMinimalExpression(this Symbol symbol, GlobalState globals)
+        {
+            if (symbol is DatabaseSymbol database)
+            {
+                var cluster = globals.GetCluster(database);
+                var dbExpression = $"database({KustoFacts.GetSingleQuotedStringLiteral(database.Name)})";
+                return cluster == globals.Cluster
+                    ? dbExpression
+                    : $"{GetMinimalExpression(cluster, globals)}.{dbExpression}";
+            }
+            else if (symbol is ClusterSymbol cluster)
+            {
+                return $"cluster({KustoFacts.GetSingleQuotedStringLiteral(cluster.Name)})";
+            }
+            else if (symbol is TableSymbol 
+                || symbol is FunctionSymbol
+                || symbol is EntityGroupSymbol
+                || symbol is GraphModelSymbol)
+            {
+                var symbolExpression = KustoFacts.BracketNameIfNecessary(symbol.Name);
+                var db = globals.GetDatabase(symbol);
+                return (db != null && db != globals.Database)
+                    ? $"{GetMinimalExpression(db, globals)}.{symbolExpression}"
+                    : symbolExpression;
+            }
+            else
+            {
+                return KustoFacts.BracketNameIfNecessary(symbol.Name);
+            }
+        }
+
+        /// <summary>
+        /// Gets a KQL expression that references the symbol.
+        /// </summary>
+        public static string GetExpression(this Symbol symbol, GlobalState globals)
+        {
+            if (symbol is DatabaseSymbol database)
+            {
+                var cluster = globals.GetCluster(database);
+                var dbExpression = $"database({KustoFacts.GetSingleQuotedStringLiteral(database.Name)})";
+                return cluster != null
+                    ? $"{GetExpression(cluster, globals)}.{dbExpression}"
+                    : dbExpression;
+            }
+            else if (symbol is ClusterSymbol cluster)
+            {
+                return $"cluster({KustoFacts.GetSingleQuotedStringLiteral(cluster.Name)})";
+            }
+            else if (symbol is TableSymbol
+                || symbol is FunctionSymbol
+                || symbol is EntityGroupSymbol
+                || symbol is GraphModelSymbol)
+            {
+                var symbolExpression = KustoFacts.BracketNameIfNecessary(symbol.Name);
+                var db = globals.GetDatabase(symbol);
+                return db != null
+                    ? $"{GetExpression(db, globals)}.{symbolExpression}"
+                    : symbolExpression;
+            }
+            else
+            {
+                return KustoFacts.BracketNameIfNecessary(symbol.Name);
+            }
+        }
     }
 }

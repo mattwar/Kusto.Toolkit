@@ -15,7 +15,7 @@ namespace Tests
         public async Task TestAddOrUpdateDatabaseAsync()
         {
             var globals = GlobalState.Default;
-            var loader = new TestLoader(OneTestCluster);
+            var loader = new TestSymbolLoader(OneTestCluster);
 
             var newGlobals = await loader.AddOrUpdateDatabaseAsync(globals, "db1");
 
@@ -37,7 +37,7 @@ namespace Tests
         public async Task TestAddOrUpdateDefaultDatabaseAsync()
         {
             var globals = GlobalState.Default;
-            var loader = new TestLoader(OneTestCluster);
+            var loader = new TestSymbolLoader(OneTestCluster);
 
             var newGlobals = await loader.AddOrUpdateDefaultDatabaseAsync(globals, "db1");
 
@@ -59,7 +59,7 @@ namespace Tests
         public async Task TestAddDatabaseAsync()
         {
             var globals = GlobalState.Default;
-            var loader = new TestLoader(OneTestCluster);
+            var loader = new TestSymbolLoader(OneTestCluster);
 
             var newGlobals = await loader.AddDatabaseAsync(globals, "db1");
 
@@ -85,7 +85,7 @@ namespace Tests
         public async Task TestAddDefaultDatabaseAsync()
         {
             var globals = GlobalState.Default;
-            var loader = new TestLoader(OneTestCluster);
+            var loader = new TestSymbolLoader(OneTestCluster);
 
             var newGlobals = await loader.AddDefaultDatabaseAsync(globals, "db1");
 
@@ -111,7 +111,7 @@ namespace Tests
         public async Task TestAddDefaultDatabaseAsync_definedButNotDefault()
         {
             var globals = GlobalState.Default;
-            var loader = new TestLoader(OneTestCluster);
+            var loader = new TestSymbolLoader(OneTestCluster);
 
             var newGlobals = await loader.AddDatabaseAsync(globals, "db1");
 
@@ -140,7 +140,7 @@ namespace Tests
         [TestMethod]
         public async Task TestAddOrUpdateClusterAsync()
         {
-            var loader = new TestLoader(OneTestCluster);
+            var loader = new TestSymbolLoader(OneTestCluster);
 
             // no clusters, but default cluster and database are set with no names.
             var globals = GlobalState.Default;
@@ -161,7 +161,7 @@ namespace Tests
         [TestMethod]
         public async Task TestAddOrUpdateDefaultClusterAsync()
         {
-            var loader = new TestLoader(OneTestCluster, "cluster1");
+            var loader = new TestSymbolLoader(OneTestCluster, "cluster1");
 
             // no clusters, but default cluster and database are set with no names.
             var globals = GlobalState.Default;
@@ -182,7 +182,7 @@ namespace Tests
         [TestMethod]
         public async Task TestAddClusterAsync()
         {
-            var loader = new TestLoader(OneTestCluster);
+            var loader = new TestSymbolLoader(OneTestCluster);
 
             // no clusters, but default cluster and database are set with no names.
             var globals = GlobalState.Default;
@@ -207,7 +207,7 @@ namespace Tests
         [TestMethod]
         public async Task TestAddDefaultClusterAsync()
         {
-            var loader = new TestLoader(OneTestCluster, "cluster1");
+            var loader = new TestSymbolLoader(OneTestCluster, "cluster1");
 
             // no clusters, but default cluster and database are set with no names.
             var globals = GlobalState.Default;
@@ -232,7 +232,7 @@ namespace Tests
         [TestMethod]
         public async Task TestAddDefaultClusterAsync_definedButNotDefault()
         {
-            var loader = new TestLoader(OneTestCluster);
+            var loader = new TestSymbolLoader(OneTestCluster);
 
             // no clusters, but default cluster and database are set with no names.
             var globals = GlobalState.Default;

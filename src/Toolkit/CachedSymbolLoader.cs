@@ -73,17 +73,17 @@ namespace Kusto.Toolkit
         /// If the cluster name is not specified, the loader's default cluster name is used.
         /// Returns null if the cluster is not found.
         /// </summary>
-        public override async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public override async Task<IReadOnlyList<DatabaseName>> LoadDatabaseNamesAsync(string clusterName = null, CancellationToken cancellationToken = default)
         {
             var dbNames = await this.FileLoader.LoadDatabaseNamesAsync(clusterName, cancellationToken: cancellationToken).ConfigureAwait(false);
 
             if (dbNames == null)
             {
-                dbNames = await this.ServerLoader.LoadDatabaseNamesAsync(clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
+                dbNames = await this.ServerLoader.LoadDatabaseNamesAsync(clusterName, cancellationToken).ConfigureAwait(false);
 
                 if (dbNames != null)
                 {
-                    await this.FileLoader.SaveDatabaseNamesAsync(dbNames, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
+                    await this.FileLoader.SaveDatabaseNamesAsync(dbNames, clusterName, cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -95,17 +95,17 @@ namespace Kusto.Toolkit
         /// If the cluster name is not specified, the loader's default cluster name is used.
         /// Returns null if the database is not found.
         /// </summary>
-        public override async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public override async Task<DatabaseSymbol> LoadDatabaseAsync(string databaseName, string clusterName = null, CancellationToken cancellationToken = default)
         {
-            var db = await this.FileLoader.LoadDatabaseAsync(databaseName, clusterName, false, cancellationToken).ConfigureAwait(false);
+            var db = await this.FileLoader.LoadDatabaseAsync(databaseName, clusterName, cancellationToken).ConfigureAwait(false);
 
             if (db == null)
             {
-                db = await this.ServerLoader.LoadDatabaseAsync(databaseName, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
+                db = await this.ServerLoader.LoadDatabaseAsync(databaseName, clusterName, cancellationToken).ConfigureAwait(false);
 
                 if (db != null)
                 {
-                    await this.FileLoader.SaveDatabaseAsync(db, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
+                    await this.FileLoader.SaveDatabaseAsync(db, clusterName, cancellationToken).ConfigureAwait(false);
                 }
             }
 

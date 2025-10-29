@@ -1,158 +1,223 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Kusto.Data;
-using Kusto.Language;
-using Kusto.Language.Symbols;
 using Kusto.Toolkit;
-using System.IO;
 
 namespace Tests
 {
     [TestClass]
-    public class ServerSymbolLoaderTests : SymbolLoaderTestBase
+    public class ServerSymbolLoaderTests
     {
-        private ServerSymbolLoader CreateLoader(string connection = null)
+        private async Task Test(object[] results, Func<ServerSymbolLoader, Task> fnValidate)
         {
-            return new ServerSymbolLoader(new KustoConnectionStringBuilder(connection ?? HelpConnection));
+            var loader = new TestServerSymbolLoader(results);
+            await fnValidate(loader);
         }
 
         [TestMethod]
-        public async Task TestLoadDatabaseNamesAsync_implicit_cluster()
+        public async Task TestLoadDatabaseNamesAsync()
         {
-            using (var loader = CreateLoader())
-            {
-                var names = await loader.LoadDatabaseNamesAsync();
-                Assert.IsNotNull(names);
-                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
-            }
+            // null databases
+            await Test([],
+                async (loader) =>
+                {
+                    var dbNames = await loader.LoadDatabaseNamesAsync();
+                    Assert.IsNull(dbNames);
+                });
+
+            // empty database list
+            await Test([
+                new ServerSymbolLoader.DatabaseNamesResult[]{}
+                ],
+                async (loader) =>
+                {
+                    var dbNames = await loader.LoadDatabaseNamesAsync();
+                    Assert.IsNotNull(dbNames);
+                    Assert.AreEqual(0, dbNames.Count);
+                });
+
+            // database list
+            await Test([
+                new ServerSymbolLoader.DatabaseNamesResult[]{
+                    new (){ DatabaseName = "db1", PrettyName="db1" },
+                    new (){ DatabaseName = "db2", PrettyName="database#2" }
+                }],
+                async (loader) =>
+                {
+                    var dbNames = await loader.LoadDatabaseNamesAsync();
+                    Assert.IsNotNull(dbNames);
+                    Assert.AreEqual(2, dbNames.Count);
+                });
         }
 
         [TestMethod]
-        public async Task TestLoadDatabaseNamesAsync_explicit_cluster_short_name()
+        public async Task TestLoadDatabaseAsync_UnknownDatabase()
         {
-            using (var loader = CreateLoader())
+            await Test([], async (loader) =>
             {
-                var names = await loader.LoadDatabaseNamesAsync("help");
-                Assert.IsNotNull(names);
-                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
-            }
-        }
-
-        [TestMethod]
-        public async Task TestLoadDatabaseNamesAsync_explicit_cluster_full_name()
-        {
-            using (var loader = CreateLoader())
-            {
-                var names = await loader.LoadDatabaseNamesAsync(HelpCluster);
-                Assert.IsNotNull(names);
-                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
-            }
-        }
-
-        [TestMethod]
-        public async Task TestLoadDatabaseNamesAsync_explicit_cluster_wrong_case()
-        {
-            using (var loader = CreateLoader())
-            {
-                var names = await loader.LoadDatabaseNamesAsync(HelpCluster.ToUpper());
-                Assert.IsNotNull(names);
-                Assert.IsTrue(names.Any(n => n.Name == "Samples"));
-            }
-        }
-
-        [TestMethod]
-        public async Task TestLoadDatabaseNamesAsync_unknown_cluster()
-        {
-            using (var loader = CreateLoader())
-            {
-                var names = await loader.LoadDatabaseNamesAsync("unknown_cluster");
-                Assert.IsNull(names);
-            }
-        }
-
-        [TestMethod]
-        public async Task TestLoadDatabaseAsync_implicit_cluster()
-        {
-            using (var loader = CreateLoader())
-            {
-                var dbSymbol = await loader.LoadDatabaseAsync("Samples");
-                Assert.IsNotNull(dbSymbol);
-
-                Assert.IsTrue(dbSymbol.Members.Count > 0, "members count");
-                Assert.IsTrue(dbSymbol.Tables.Count > 0, "tables count");
-                Assert.IsTrue(dbSymbol.MaterializedViews.Count > 0, "materialized views count");
-                Assert.IsTrue(dbSymbol.Functions.Count > 0, "functions count");
-            }
-        }
-
-        [TestMethod]
-        public async Task TestLoadDatabaseAsync_explicit_cluster()
-        {
-            using (var loader = CreateLoader())
-            {
-                var dbSymbol = await loader.LoadDatabaseAsync("Samples", HelpCluster);
-                Assert.IsNotNull(dbSymbol);
-
-                Assert.IsTrue(dbSymbol.Members.Count > 0, "members count");
-                Assert.IsTrue(dbSymbol.Tables.Count > 0, "tables count");
-                Assert.IsTrue(dbSymbol.MaterializedViews.Count > 0, "materialized views count");
-                Assert.IsTrue(dbSymbol.Functions.Count > 0, "functions count");
-            }
-        }
-
-        [TestMethod]
-        public async Task TestLoadSamples_versus_baseline()
-        {
-            using (var loader = CreateLoader())
-            {
-                var dbSymbol = await loader.LoadDatabaseAsync("Samples", HelpCluster);
-                Assert.IsNotNull(dbSymbol);
-
-                var cachePath = Path.Combine(Environment.CurrentDirectory, "Schema");
-                var baseLineLoader = new FileSymbolLoader(cachePath, HelpCluster);
-                var dbBaseline = await baseLineLoader.LoadDatabaseAsync(dbSymbol.Name, throwOnError: true);
-                Assert.IsNotNull(dbBaseline);
-
-                var possibleNewBaseline = FileSymbolLoader.SerializeDatabase(dbSymbol);
-
-                AssertEqual(dbBaseline, dbSymbol);
-            }
-        }
-
-        [TestMethod]
-        public async Task TestLoadDatabaseAsync_unknown_cluster()
-        {
-            using (var loader = CreateLoader())
-            {
-                var dbSymbol = await loader.LoadDatabaseAsync("Samples", "unknown_cluster");
+                var dbSymbol = await loader.LoadDatabaseAsync("UnknownDb");
                 Assert.IsNull(dbSymbol);
-            }
+            });
         }
 
         [TestMethod]
-        public async Task TestLoadDatabaseAsync_unknown_database()
+        public async Task TestLoadDatabaseAsync_KnownDatabase()
         {
-            using (var loader = CreateLoader())
-            {
-                var dbSymbol = await loader.LoadDatabaseAsync("not-a-db");
-                Assert.IsNull(dbSymbol);
-            }
+            // call with db name
+            await Test(
+                [new DatabaseName("MyDb", "MyPrettyDb")],
+                async (loader) =>
+                {
+                    var dbSymbol = await loader.LoadDatabaseAsync("MyDb");
+                    Assert.IsNotNull(dbSymbol);
+                    Assert.AreEqual("MyDb", dbSymbol.Name);
+                    Assert.AreEqual("MyPrettyDb", dbSymbol.AlternateName);
+                });
+
+            // call with pretty name
+            await Test(
+                [new DatabaseName("MyDb", "MyPrettyDb")],
+                async (loader) =>
+                {
+                    var dbSymbol = await loader.LoadDatabaseAsync("MyPrettyDb");
+                    Assert.IsNotNull(dbSymbol);
+                    Assert.AreEqual("MyDb", dbSymbol.Name);
+                    Assert.AreEqual("MyPrettyDb", dbSymbol.AlternateName);
+                });
         }
 
-#if false
         [TestMethod]
-        public async Task TestLoadDatabaseAsync_PrettyName()       
+        public async Task TestLoadDatabaseAsync_Tables()
         {
-            // test with a private cluster since no databases in Help cluster have pretty names
-            using (var loader = CreateLoader("Data Source=https://kvcc4b8b0165e074002bc5.southcentralus.kusto.windows.net;Fed=true"))
-            {
-                var dbSymbol = await loader.LoadDatabaseAsync("PrettyZomg");
-                Assert.IsNotNull(dbSymbol);
-            }
+            await Test([
+                new DatabaseName("MyDb", "MyPrettyDb"),
+                new ServerSymbolLoader.LoadTablesResult[]
+                {
+                    new () {TableName="T", Schema="x:long", DocString=""},
+                    new () {TableName="T2", Schema="a:string, b:real", DocString="The terminator"}
+                }],
+                async (loader) =>
+                {
+                    var dbSymbol = await loader.LoadDatabaseAsync("MyDb");
+                    Assert.IsNotNull(dbSymbol);
+                    Assert.AreEqual(2, dbSymbol.Members.Count);
+                    Assert.IsNotNull(dbSymbol.GetTable("T"));
+                    Assert.IsNotNull(dbSymbol.GetTable("T2"));
+                });
         }
-#endif
+
+        [TestMethod]
+        public async Task TestLoadDatabaseAsync_Functions()
+        {
+            await Test([
+                new DatabaseName("MyDb", "MyPrettyDb"),
+                new ServerSymbolLoader.LoadFunctionsResult[]
+                {
+                    new () { Name="F", Parameters="(x:long)", Body="{ x + 1 }" },
+                }],
+                async (loader) =>
+                {
+                    var dbSymbol = await loader.LoadDatabaseAsync("MyDb");
+                    Assert.IsNotNull(dbSymbol);
+                    Assert.AreEqual(1, dbSymbol.Functions.Count);
+                    Assert.IsNotNull(dbSymbol.GetFunction("F"));
+                });
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseAsync_ExternalTables()
+        {
+            await Test(
+                [
+                new DatabaseName("MyDb", "MyPrettyDb"),
+                new ServerSymbolLoader.LoadExternalTablesResult1[]
+                {
+                    new () { TableName="ET" }
+                },
+                new ServerSymbolLoader.LoadExternalTablesResult2[]
+                {
+                    new () { TableName="ET", Schema="x:long" }
+                }
+                ],
+                async (loader) =>
+                {
+                    var dbSymbol = await loader.LoadDatabaseAsync("MyDb");
+                    Assert.IsNotNull(dbSymbol);
+                    Assert.AreEqual(1, dbSymbol.ExternalTables.Count);
+                    Assert.IsNotNull(dbSymbol.GetExternalTable("ET"));
+                });
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseAsync_MaterializedViews()
+        {
+            await Test(
+                [
+                new DatabaseName("MyDb", "MyPrettyDb"),
+                new ServerSymbolLoader.LoadMaterializedViewsResult1[]
+                {
+                    new () { Name="MV", Query="T" }
+                },
+                new ServerSymbolLoader.LoadMaterializedViewsResult2[]
+                {
+                    new () { Name="MV", Schema="x:long" }
+                }
+                ],
+                async (loader) =>
+                {
+                    var dbSymbol = await loader.LoadDatabaseAsync("MyDb");
+                    Assert.IsNotNull(dbSymbol);
+                    Assert.AreEqual(1, dbSymbol.MaterializedViews.Count);
+                    Assert.IsNotNull(dbSymbol.GetMaterializedView("MV"));
+                });
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseAsync_EntityGroups()
+        {
+            await Test(
+                [
+                new DatabaseName("MyDb", "MyPrettyDb"),
+                new ServerSymbolLoader.LoadEntityGroupsResult[]
+                {
+                    new () { Name="EG", Entities="database('db'), database('db2')" }
+                },
+                ],
+                async (loader) =>
+                {
+                    var dbSymbol = await loader.LoadDatabaseAsync("MyDb");
+                    Assert.IsNotNull(dbSymbol);
+                    Assert.AreEqual(1, dbSymbol.EntityGroups.Count);
+                    Assert.IsNotNull(dbSymbol.GetEntityGroup("EG"));
+                });
+        }
+
+        [TestMethod]
+        public async Task TestLoadDatabaseAsync_GraphModels()
+        {
+            await Test(
+                [
+                new DatabaseName("MyDb", "MyPrettyDb"),
+                new ServerSymbolLoader.LoadGraphModelResult[]
+                {
+                    new () { Name="GM", Model="""{ "Definition": { "Steps": [{ "Kind": "AddEdges", "Query": "E" }, { "Kind": "AddNodes", "Query": "N" }] } }""" }
+                },
+                new ServerSymbolLoader.LoadGraphModelSnapshotsResult[]
+                {
+                    new () { ModelName="GM", Snapshots="""["Latest", "SN1", "SN2"]""" }
+                }
+                ],
+                async (loader) =>
+                {
+                    var dbSymbol = await loader.LoadDatabaseAsync("MyDb");
+                    Assert.IsNotNull(dbSymbol);
+                    Assert.AreEqual(1, dbSymbol.GraphModels.Count);
+                    var gm = dbSymbol.GetGraphModel("GM");
+                    Assert.IsNotNull(gm);
+                    Assert.AreEqual(1, gm.Edges.Count);
+                    Assert.AreEqual(1, gm.Nodes.Count);
+                    Assert.AreEqual(3, gm.Snapshots.Count);
+                });
+        }
     }
 }

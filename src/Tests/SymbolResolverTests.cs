@@ -27,7 +27,7 @@ namespace Tests
                         new TableSymbol("Table2", "(x: long)")))
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // set default database.
@@ -66,7 +66,7 @@ namespace Tests
                         new TableSymbol("Table2", "(x: long)")))
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // set default database.
@@ -107,7 +107,7 @@ namespace Tests
                         new TableSymbol("Table2", "(x: long)")))
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // no defaults set
@@ -138,7 +138,7 @@ namespace Tests
                         new TableSymbol("Table2", "(x: long)")))
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // no defaults set
@@ -182,7 +182,7 @@ namespace Tests
                         new TableSymbol("Table2", "(x: long)")))
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // set default database.
@@ -217,7 +217,7 @@ namespace Tests
                         new TableSymbol("Table2", "(x: long)")))
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // set default database.
@@ -258,7 +258,7 @@ namespace Tests
                         new TableSymbol("Table3", "(x: long)")))                      
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // set default database.
@@ -299,7 +299,7 @@ namespace Tests
                         new TableSymbol("Table3", "(x: long)")))
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // set default database.
@@ -331,7 +331,7 @@ namespace Tests
                         new TableSymbol("Table2", "(x: long)")))
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // set default database.
@@ -375,7 +375,7 @@ namespace Tests
                         new TableSymbol("Table3", "(x: long)")))
             };
 
-            var loader = new TestLoader(clusters, "cluster1");
+            var loader = new TestSymbolLoader(clusters, "cluster1");
             var resolver = new SymbolResolver(loader);
 
             // set default database.

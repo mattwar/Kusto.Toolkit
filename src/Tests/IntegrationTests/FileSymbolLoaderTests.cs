@@ -7,7 +7,7 @@ using Kusto.Toolkit;
 using Kusto.Language.Symbols;
 using System.IO;
 
-namespace Tests
+namespace Tests.Integration
 {
     [TestClass]
     public class FileSymbolLoaderTests : SymbolLoaderTestBase
@@ -31,10 +31,10 @@ namespace Tests
 #endif
 
         [TestMethod]
-        public Task TestLoadDatabaseNamesAsync()
+        public async Task TestLoadDatabaseNamesAsync()
         {
             // the save test tests both load and save
-            return TestSaveDatabaseNamesAsync();
+            await TestSaveDatabaseNamesAsync();
         }
 
         [TestMethod]

@@ -32,7 +32,7 @@ namespace Kusto.Toolkit
         /// <summary>
         /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the query but not already present in the <see cref="GlobalState"/>.
         /// </summary>
-        public async Task<KustoCode> AddReferencedDatabasesAsync(KustoCode code, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public async Task<KustoCode> AddReferencedDatabasesAsync(KustoCode code, CancellationToken cancellationToken = default)
         {
             // this only works if analysis is performed
             if (!code.HasSemantics)
@@ -44,7 +44,7 @@ namespace Kusto.Toolkit
             for (int loopCount = 0; loopCount < MaxLoopCount; loopCount++)
             {
                 var service = new KustoCodeService(code);
-                var globals = await AddReferencedDatabasesAsync(code.Globals, service, throwOnError, cancellationToken).ConfigureAwait(false);
+                var globals = await AddReferencedDatabasesAsync(code.Globals, service, cancellationToken).ConfigureAwait(false);
 
                 // if no databases were added we are done
                 if (globals == code.Globals)
@@ -60,7 +60,7 @@ namespace Kusto.Toolkit
         /// <summary>
         /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the <see cref="CodeScript"/> document but not already present in the <see cref="GlobalState"/>.
         /// </summary>
-        public async Task<CodeScript> AddReferencedDatabasesAsync(CodeScript script, bool throwOnError = false, CancellationToken cancellationToken = default)
+        public async Task<CodeScript> AddReferencedDatabasesAsync(CodeScript script, CancellationToken cancellationToken = default)
         {
             // keep looping until no more databases are added to globals
             for (int loopCount = 0; loopCount < MaxLoopCount; loopCount++)
@@ -68,7 +68,7 @@ namespace Kusto.Toolkit
                 var currentGlobals = script.Globals;
                 foreach (var block in script.Blocks)
                 {
-                    currentGlobals = await AddReferencedDatabasesAsync(currentGlobals, block.Service, throwOnError, cancellationToken).ConfigureAwait(false);
+                    currentGlobals = await AddReferencedDatabasesAsync(currentGlobals, block.Service, cancellationToken).ConfigureAwait(false);
                 }
 
                 // if no databases were added we are done
@@ -84,7 +84,7 @@ namespace Kusto.Toolkit
         /// <summary>
         /// Loads and adds the <see cref="DatabaseSymbol"/> for any database explicity referenced in the query but not already present in the <see cref="GlobalState"/>.
         /// </summary>
-        private async Task<GlobalState> AddReferencedDatabasesAsync(GlobalState globals, CodeService service, bool throwOnError = false, CancellationToken cancellationToken = default)
+        private async Task<GlobalState> AddReferencedDatabasesAsync(GlobalState globals, CodeService service, CancellationToken cancellationToken = default)
         {
             // find all explicit cluster('xxx') references
             var clusterRefs = service.GetClusterReferences(cancellationToken);
@@ -102,7 +102,7 @@ namespace Kusto.Toolkit
                 var cluster = globals.GetCluster(clusterName);
                 if (cluster == null || cluster.IsOpen)
                 {
-                    globals = await _loader.AddOrUpdateClusterAsync(globals, clusterName, throwOnError, cancellationToken).ConfigureAwait(false);
+                    globals = await _loader.AddOrUpdateClusterAsync(globals, clusterName, cancellationToken).ConfigureAwait(false);
                 }
             }
 
@@ -136,7 +136,7 @@ namespace Kusto.Toolkit
                 var db = cluster.GetDatabase(dbRef.Database);
                 if (db == null || (db != null && db.Members.Count == 0 && db.IsOpen))
                 {
-                    var newGlobals = await _loader.AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, throwOnError, cancellationToken).ConfigureAwait(false);
+                    var newGlobals = await _loader.AddOrUpdateDatabaseAsync(globals, dbRef.Database, cluster.Name, cancellationToken).ConfigureAwait(false);
                     globals = newGlobals ?? globals;
                 }
             }

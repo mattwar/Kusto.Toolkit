@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Tests
 {
-    public static class SymbolExtensions
+    public static class TestHelpers
     {
         /// <summary>
         /// Converts the symbol to string for test comparison purposes.
